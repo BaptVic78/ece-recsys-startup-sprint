@@ -1,0 +1,7 @@
+# Model/API environment requires Python 3.12+.
+torch==2.15.0
+fastapi==0.163.1
+pydantic==2.14.3
+uvicorn==0.54.0
+numpy==2.5.4
+httpx2==2.16.0
