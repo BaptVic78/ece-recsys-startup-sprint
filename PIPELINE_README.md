@@ -49,3 +49,18 @@ evaluating the test session, its chronological context may include validation
 sessions, but must exclude the test group and future events. These exports
 prepare histories and splits. A recommendation model and ranking evaluation
 remain subsequent work.
+
+## Full dataset validation, 2026-11-15
+
+The complete official download contained 167,783 records. Processing retained
+70,559 running sessions across 807 users, with 69,095 training sessions,
+732 validation sessions and 732 test sessions. There are 732 evaluation users.
+The remaining 75 users have fewer than three distinct session start timestamps.
+The loader excluded 97,192 non-running records and 32 running records with
+unordered timestamps. Retained sessions per user range from 1 to 1,168,
+with a mean of 87.43.
+
+The full exports were checked for unique workout IDs, positive durations,
+strict chronological ordering across splits per evaluation user, and exact
+coverage of all retained sessions by the three disjoint split files.
+Both automated tests passed.
