@@ -5,13 +5,33 @@ import io
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from strideplan_pipeline.pipeline import normalize, prepare
 from strideplan_pipeline.validate import validate
+from strideplan_pipeline.download import main as download
 
 
 class PipelineTest(unittest.TestCase):
+    def test_download_publishes_only_complete_files(self):
+        for size in (4, 10):
+            with self.subTest(expected_size=size), tempfile.TemporaryDirectory() as directory:
+                target = Path(directory) / "nested" / "raw.json"
+                response = io.BytesIO(b"data")
+                response.headers = {"Content-Length": str(size)}
+                with patch("sys.argv", ["download", "--output", str(target)]), \
+                     patch("urllib.request.urlopen", return_value=response), \
+                     contextlib.redirect_stdout(io.StringIO()):
+                    if size == 4:
+                        download()
+                        self.assertEqual(target.read_bytes(), b"data")
+                        self.assertFalse(target.with_suffix(".json.part").exists())
+                    else:
+                        with self.assertRaisesRegex(OSError, "Incomplete download"):
+                            download()
+                        self.assertFalse(target.exists())
+
     def test_gzipped_json_and_train_only_user(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "input.json.gz"
