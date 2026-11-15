@@ -1,5 +1,6 @@
 import contextlib
 import csv
+import gzip
 import io
 import json
 import tempfile
@@ -10,6 +11,16 @@ from strideplan_pipeline.pipeline import prepare
 
 
 class PipelineTest(unittest.TestCase):
+    def test_gzipped_json_and_train_only_user(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "input.json.gz"
+            with gzip.open(source, "wt") as stream:
+                stream.write(json.dumps(dict(userId=1, id=2, sport="run", timestamp=[100, 180])))
+            with contextlib.redirect_stdout(io.StringIO()):
+                stats = prepare(source, Path(directory) / "output")
+            self.assertEqual(stats["split_sessions"], {"train": 1})
+            self.assertEqual(stats["evaluation_users"], 0)
+
     def test_filter_duration_duplicates_and_temporal_splits(self):
         def session(identifier, start, user="a", sport="run"):
             return dict(userId=user, id=identifier, sport=sport, timestamp=[start, start + 60])

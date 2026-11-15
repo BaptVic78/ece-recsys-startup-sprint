@@ -6,6 +6,7 @@ import csv
 import gzip
 import json
 import math
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -45,6 +46,8 @@ def prepare(source, output):
             if not line.strip():
                 continue
             counts["records_read"] += 1
+            if counts["records_read"] % 10000 == 0:
+                print(f"Processed {counts['records_read']} records", file=sys.stderr, flush=True)
             try:
                 try:
                     record = json.loads(line)
