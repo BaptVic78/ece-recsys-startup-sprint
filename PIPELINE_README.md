@@ -1,66 +1,41 @@
 # StridePlan data pipeline
 
-Python 3.10+ and the standard library are sufficient. Run commands from the repository root.
+This pipeline prepares Endomondo running histories for our workout recommender.
+It keeps valid runs, removes duplicates, calculates recorded duration, and sorts each runner's sessions by date.
 
-## Download and prepare
+The latest session goes to test, the previous one to validation, and the rest to training.
+Sessions with the same start time stay together. Runners with fewer than three distinct start times contribute only to training.
 
-The official [UCSD FitRec release](https://cseweb.ucsd.edu/~jmcauley/datasets/fitrec.html)
-contains Endomondo workout logs. The filtered `endomondoHR_proper.json` download
-is approximately 4.9 GB. Its counts differ from the original 253,020-workout collection.
+## Results
+
+The full download was processed on November 15, 2026.
+
+| Output | Count |
+| --- | ---: |
+| Records read | 167,783 |
+| Valid running sessions | 70,559 |
+| Runners | 807 |
+| Training sessions | 69,095 |
+| Validation sessions | 732 |
+| Test sessions | 732 |
+
+We excluded 97,192 non-running records and 32 runs with unordered timestamps.
+Both automated tests passed. Checks on the full output confirmed unique sessions, positive durations, and chronological splits with no overlap.
+
+## Run it
+
+Requires Python 3.10+ with no extra packages. From the repository root, download the [official FitRec dataset](https://cseweb.ucsd.edu/~jmcauley/datasets/fitrec.html) (about 4.9 GB), then prepare it.
 
 ```bash
 mkdir -p data/raw
 curl --fail --location --retry 3 --continue-at - \
   --output data/raw/endomondoHR_proper.json.part \
-  https://mcauleylab.ucsd.edu/public_datasets/gdrive/fitrec/endomondoHR_proper.json
+  https://mcauleylab.ucsd.edu/public_datasets/gdrive/fitrec/endomondoHR_proper.json && \
 mv data/raw/endomondoHR_proper.json.part data/raw/endomondoHR_proper.json
 python3 -m strideplan_pipeline.pipeline --input data/raw/endomondoHR_proper.json
 python3 -m unittest discover -s strideplan_pipeline -p 'test_*.py'
 ```
 
-Only rename the partial download after curl succeeds. Raw and generated data are ignored by Git.
-The loader streams JSON lines or Python dictionary literals using `ast.literal_eval`.
-It also accepts gzip files. Only small normalized session records remain in memory.
+Outputs are saved in `data/processed/`: all sessions, the three split CSVs, `users.csv`, and `stats.json`. Data files are excluded from Git.
 
-## Validation and exports
-
-Only `sport == "run"` is retained. Each running session requires user and workout
-identifiers and at least two finite, positive, nondecreasing Unix timestamps.
-The duration is the final timestamp minus the first, in seconds. This measures
-the recorded interval, which can differ from the complete workout duration if
-the source recording was truncated. Normalized `time_elapsed` values are not used.
-Zero-duration sessions and repeated workout IDs are discarded. Rejection counts
-are included in `stats.json`.
-
-Outputs in `data/processed/` are `sessions.csv`, `train.csv`, `validation.csv`,
-`test.csv`, `users.csv`, and `stats.json`. Override the directory with `--output`.
-Session rows include user, workout, sport, start timestamp, duration, and split.
-User statistics include retained sessions and eligibility for evaluation.
-
-Sessions are ordered per user. With at least three distinct start timestamps,
-the latest timestamp group goes to test, the preceding group to validation,
-and all earlier groups to training. Tied starts remain together. Users with fewer
-than three distinct starts contribute only to training and are excluded from
-held-out evaluation. The split is per user, not a global calendar cutoff.
-
-Build future learned features, categories, popularity scores and normalization
-statistics from training only. Validation can select hyperparameters. When
-evaluating the test session, its chronological context may include validation
-sessions, but must exclude the test group and future events. These exports
-prepare histories and splits. A recommendation model and ranking evaluation
-remain subsequent work.
-
-## Full dataset validation, 2026-11-15
-
-The complete official download contained 167,783 records. Processing retained
-70,559 running sessions across 807 users, with 69,095 training sessions,
-732 validation sessions and 732 test sessions. There are 732 evaluation users.
-The remaining 75 users have fewer than three distinct session start timestamps.
-The loader excluded 97,192 non-running records and 32 running records with
-unordered timestamps. Retained sessions per user range from 1 to 1,168,
-with a mean of 87.43.
-
-The full exports were checked for unique workout IDs, positive durations,
-strict chronological ordering across splits per evaluation user, and exact
-coverage of all retained sessions by the three disjoint split files.
-Both automated tests passed.
+Duration measures the recorded trace, which may cover only part of a workout. Future model features must be fitted on training data only to avoid data leakage.
