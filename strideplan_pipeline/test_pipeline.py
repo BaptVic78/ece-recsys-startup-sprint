@@ -122,9 +122,26 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(stats["records"]["invalid_timestamps"], 1)
             self.assertEqual(stats["split_sessions"], {"train": 11, "validation": 1, "test": 1})
             validate(output)
+            original_train = (output / "train.csv").read_text()
             with (output / "train.csv").open("a") as stream:
                 stream.write((output / "test.csv").read_text().splitlines()[1] + "\n")
             with self.assertRaises(ValueError):
+                validate(output)
+            (output / "train.csv").write_text(original_train)
+            for name in ("sessions", "train"):
+                path = output / f"{name}.csv"
+                with path.open() as stream:
+                    reader = csv.DictReader(stream)
+                    fields = reader.fieldnames
+                    rows = list(reader)
+                for row in rows:
+                    if row["user_id"] == "long" and row["split"] == "train":
+                        row["start_timestamp"] = str(float(row["start_timestamp"]) + 10000)
+                with path.open("w", newline="") as stream:
+                    writer = csv.DictWriter(stream, fieldnames=fields)
+                    writer.writeheader()
+                    writer.writerows(rows)
+            with self.assertRaisesRegex(ValueError, "Temporal leakage"):
                 validate(output)
 
 
