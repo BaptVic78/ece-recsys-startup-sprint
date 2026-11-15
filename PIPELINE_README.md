@@ -33,3 +33,7 @@ The [official download](https://cseweb.ucsd.edu/~jmcauley/datasets/fitrec.html) 
 Optional pipeline flags are `--min-duration 300`, `--max-duration 21600` (seconds), `--min-train-sessions 5`, and `--output data/processed`.
 
 Outputs in `data/processed/` include all sessions, the three split CSVs, `users.csv`, and `stats.json`. Data files are excluded from Git. The validation command checks unique IDs, positive bounded durations, split coverage and chronology, minimum history, and summary counts without rereading the raw download.
+
+## Full run after review
+
+The full 167,783-record release produced 70,559 runs for 807 runners. The splits contain 69,229 training, 665 validation and 665 test sessions. Heart-rate averages are missing for 116 runs. The other added features are present for every retained run. All export checks and seven automated tests pass.

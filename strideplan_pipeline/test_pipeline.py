@@ -124,8 +124,8 @@ class PipelineTest(unittest.TestCase):
             validate(output)
             original_train = (output / "train.csv").read_text()
             with (output / "train.csv").open("a") as stream:
-                stream.write((output / "test.csv").read_text().splitlines()[1] + "\n")
-            with self.assertRaises(ValueError):
+                stream.write(original_train.splitlines()[1] + "\n")
+            with self.assertRaisesRegex(ValueError, "overlap"):
                 validate(output)
             (output / "train.csv").write_text(original_train)
             for name in ("sessions", "train"):
