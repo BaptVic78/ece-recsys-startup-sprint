@@ -1,3 +1,4 @@
+# Model/API environment requires Python 3.12+.
 torch==2.15.0
 fastapi==0.163.1
 pydantic==2.14.3

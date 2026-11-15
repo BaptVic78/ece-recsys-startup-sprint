@@ -26,7 +26,7 @@ def ranking_metrics(ranking, relevant, k):
     return {"recall": recall, "ndcg": dcg / ideal}
 
 
-def evaluate(rankings, relevant_by_user, cutoffs=(10, 20)):
+def evaluate(rankings, relevant_by_user, cutoffs=(1, 3)):
     """Macro-average over the same explicit set of users for all methods."""
     if not rankings or rankings.keys() != relevant_by_user.keys():
         raise ValueError("Rankings and targets must contain the same nonempty user set")

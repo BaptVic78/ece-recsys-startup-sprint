@@ -11,3 +11,5 @@ See [the pipeline guide](PIPELINE_README.md) for download commands, validation r
 ## Week 2 model, evaluation and API
 
 See [the Week 2 guide](WEEK2_README.md) to run the model smoke check, ranking metrics and mock API.
+
+The model/API dependency set requires Python 3.12+. The standalone data pipeline supports Python 3.9+.

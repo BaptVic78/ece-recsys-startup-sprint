@@ -8,7 +8,7 @@ This adds the first executable model, ranking metrics, and API contract for Stri
 
 ## Run it
 
-Tested on Python 3.12 under Ubuntu. Create and activate a virtual environment using your shell, then run these commands from the repository root. On Linux, use `python3` if needed.
+Requires Python 3.12+ for the pinned model/API dependencies. Verified under Ubuntu. The standalone data pipeline still supports Python 3.9+. Create and activate a virtual environment using your shell, then run these commands from the repository root. On Linux, use `python3` if needed.
 
 ```text
 python -m pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
@@ -34,3 +34,9 @@ The data pipeline has processed the full dataset. The model forward pass, metric
 The next step is to build the data-driven template catalogue and chronological training examples from the prepared CSVs, then train both prediction heads. Feature scaling and template boundaries must be fitted on training data only. The smoke inputs and metric values are synthetic. The API uses a fixed demo catalogue and does not call the model yet. Effort calibration, conformal risk control, LLM parsing, interaction logging, and real offline performance remain pending.
 
 The implementation uses PyTorch's [GRU](https://docs.pytorch.org/docs/stable/generated/torch.nn.GRU.html) and FastAPI's [testing tools](https://fastapi.tiangolo.com/tutorial/testing/).
+
+## Evaluation and training decisions
+
+The default metric cutoffs are @1 and @3. Pass larger cutoffs explicitly when the catalogue size justifies them, and report eligible candidate counts. With one relevant next template, Recall@K is also hit rate. The demo template IDs are synthetic placeholders. Duration, pace and terrain grouping for the real catalogue must be agreed before training. Missing sensor values and GPS outliers also need a training-only preprocessing policy.
+
+Tests are split by component. The metrics need only Python and can be run with python -m unittest discover -s tests -p test_evaluation.py. API tests are in test_api.py and require FastAPI and its test client. Model tests are in test_model.py and require PyTorch. The pinned NumPy dependency provides PyTorch array interoperability.
