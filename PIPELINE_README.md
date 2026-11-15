@@ -37,3 +37,17 @@ Outputs in `data/processed/` include all sessions, the three split CSVs, `users.
 ## Full run after review
 
 The full 167,783-record release produced 70,559 runs for 807 runners. The splits contain 69,229 training, 665 validation and 665 test sessions. Heart-rate averages are missing for 116 runs. The other added features are present for every retained run. All export checks and seven automated tests pass.
+
+### Recorded duration percentiles
+
+| Percentile | Seconds |
+| --- | ---: |
+| p0 | 501.0 |
+| p1 | 807.0 |
+| p5 | 1610.0 |
+| p50 | 3604.0 |
+| p95 | 8628.3 |
+| p99 | 13348.1 |
+| p100 | 17987.0 |
+
+The shortest retained trace is 501 seconds (8 min 21 s), and the longest is 17,987 seconds (4 h 59 min 47 s). Both fall within the default 300–21,600 second bounds, so those bounds remove no additional runs in this release.
