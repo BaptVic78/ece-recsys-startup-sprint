@@ -6,6 +6,7 @@ import csv
 import gzip
 import json
 import math
+import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -13,6 +14,17 @@ from pathlib import Path
 
 FEATURES = ["distance_meters", "avg_speed_mps", "avg_heart_rate_bpm", "elevation_gain_meters", "gender"]
 FIELDS = ["user_id", "workout_id", "sport", "start_timestamp", "duration_seconds", *FEATURES, "split"]
+QUOTED_STRING = re.compile(r"'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\"")
+
+
+def parse_python_record(line):
+    # Convert string tokens only. Keep apostrophes and escaped sensor metadata intact.
+    # The large numeric arrays can then be decoded by the C JSON parser.
+    try:
+        converted = QUOTED_STRING.sub(lambda match: json.dumps(ast.literal_eval(match.group())), line)
+        return json.loads(converted)
+    except (ValueError, SyntaxError):
+        return ast.literal_eval(line)
 
 
 def finite_number(value):
@@ -114,7 +126,7 @@ def prepare(source, output, min_duration=300, max_duration=21600, min_train_sess
                 try:
                     record = preferred_parser(line)
                 except (ValueError, SyntaxError):
-                    fallback = ast.literal_eval if preferred_parser is json.loads else json.loads
+                    fallback = parse_python_record if preferred_parser is json.loads else json.loads
                     record = fallback(line)
                     preferred_parser = fallback
                 row = normalize(record, min_duration, max_duration)

@@ -8,12 +8,22 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from strideplan_pipeline.pipeline import normalize, prepare
+from strideplan_pipeline.pipeline import normalize, parse_python_record, prepare
 from strideplan_pipeline.validate import validate
 from strideplan_pipeline.download import main as download
 
 
 class PipelineTest(unittest.TestCase):
+    def test_python_parser_preserves_strings_and_literal_fallback(self):
+        records = [dict(note="runner's \"session\"", path="C:\\runs\\new", label="é\nété", values=[1, 2.5, -3]),
+                   dict(optional=None, enabled=True, pair=(1, 2)),
+                   {1: "integer key", "nested": {"name": "run"}}]
+        for record in records:
+            with self.subTest(record=record):
+                self.assertEqual(parse_python_record(repr(record)), record)
+        with self.assertRaises((ValueError, SyntaxError)):
+            parse_python_record("{'broken':")
+
     def test_download_publishes_only_complete_files(self):
         for size in (4, 10):
             with self.subTest(expected_size=size), tempfile.TemporaryDirectory() as directory:
