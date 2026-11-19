@@ -16,4 +16,8 @@ The model/API dependency set requires Python 3.12+. The standalone data pipeline
 
 ## First results on real data
 
-See [the first-results report](results/FIRST_RESULTS.md) for the trained GRU, baseline comparisons, learning curves and reproduction commands. The first experiment predicts workout categories without time constraints; the API still serves its Week 2 mock catalogue.
+See [the first-results report](results/FIRST_RESULTS.md) for the trained GRU, baseline comparisons, learning curves and reproduction commands. The first experiment predicts workout categories without time constraints.
+
+## Serving the trained model
+
+See [the serving guide](SERVING_README.md). The API serves the trained GRU from its saved bundle, filters categories by time budget and falls back to global popularity for new users.

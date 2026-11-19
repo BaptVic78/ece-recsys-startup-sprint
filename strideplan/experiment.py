@@ -1,7 +1,6 @@
 """First real-data next-template experiment with training-only preprocessing."""
 
 import argparse
-import bisect
 import csv
 import json
 import math
@@ -14,43 +13,12 @@ import torch
 from torch.nn import functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
+from strideplan.bundle import write_bundle
 from strideplan.evaluation import evaluate, most_popular
+from strideplan.features import (FEATURE_NAMES, add_raw_features, fit_catalogue, fit_scaler, parse_session,
+                                 scale_features, template_id)
 from strideplan.model import WorkoutRanker
 from strideplan_pipeline.validate import validate
-
-
-FEATURE_NAMES = ["log_duration_minutes", "speed_mps", "log_gap_days", "heart_rate_bpm", "heart_rate_missing"]
-
-
-def fit_catalogue(training_rows, duration_bins=6, speed_bins=4):
-    if not training_rows or min(duration_bins, speed_bins) < 1:
-        raise ValueError("A nonempty training set and positive bin counts are required")
-    durations = [row["duration"] for row in training_rows]
-    speeds = [row["speed"] for row in training_rows]
-    duration_edges = [float(edge) for edge in np.unique(np.quantile(durations, np.linspace(0, 1, duration_bins + 1)[1:-1]))
-                      if min(durations) < edge < max(durations)]
-    speed_edges = [float(edge) for edge in np.unique(np.quantile(speeds, np.linspace(0, 1, speed_bins + 1)[1:-1]))
-                   if min(speeds) < edge < max(speeds)]
-    return {"duration_edges_seconds": duration_edges, "speed_edges_mps": speed_edges,
-            "num_templates": (len(duration_edges) + 1) * (len(speed_edges) + 1)}
-
-
-def template_id(row, catalogue):
-    duration_band = bisect.bisect_right(catalogue["duration_edges_seconds"], row["duration"])
-    speed_band = bisect.bisect_right(catalogue["speed_edges_mps"], row["speed"])
-    return 1 + duration_band * (len(catalogue["speed_edges_mps"]) + 1) + speed_band
-
-
-def fit_scaler(training_rows):
-    values = np.array([row["raw_features"] for row in training_rows], dtype=np.float64)
-    medians = np.array([np.median(column[np.isfinite(column)]) if np.isfinite(column).any() else 0.0
-                        for column in values.T])
-    filled = np.where(np.isfinite(values), values, medians)
-    means = filled.mean(axis=0)
-    scales = filled.std(axis=0)
-    scales[scales < 1e-8] = 1.0
-    return {"features": FEATURE_NAMES, "medians": medians.tolist(),
-            "means": means.tolist(), "scales": scales.tolist()}
 
 
 def prepare_rows(path, max_speed=10.0):
@@ -59,40 +27,21 @@ def prepare_rows(path, max_speed=10.0):
     histories = defaultdict(list)
     rejected = Counter()
     with path.open(newline="", encoding="utf-8") as stream:
-        for row in csv.DictReader(stream):
-            try:
-                speed = float(row["avg_speed_mps"])
-            except ValueError:
-                rejected["missing_or_invalid_speed"] += 1
+        for record in csv.DictReader(stream):
+            row, reason = parse_session(record, max_speed)
+            if row is None:
+                rejected[reason] += 1
                 continue
-            if not math.isfinite(speed) or not 0 < speed <= max_speed:
-                rejected["missing_or_invalid_speed"] += 1
-                continue
-            heart_rate = float(row["avg_heart_rate_bpm"]) if row["avg_heart_rate_bpm"] else float("nan")
-            if not math.isfinite(heart_rate) or not 0 < heart_rate <= 300:
-                heart_rate = float("nan")
-            histories[row["user_id"]].append({"user": row["user_id"], "id": row["workout_id"],
-                                              "time": float(row["start_timestamp"]),
-                                              "duration": float(row["duration_seconds"]),
-                                              "speed": speed, "heart_rate": heart_rate,
-                                              "split": row["split"]})
+            histories[row["user"]].append(row)
     for rows in histories.values():
-        rows.sort(key=lambda row: (row["time"], row["id"]))
-        previous_time = None
-        for row in rows:
-            gap_days = (row["time"] - previous_time) / 86400 if previous_time is not None else 0
-            row["raw_features"] = [math.log1p(row["duration"] / 60), row["speed"], math.log1p(gap_days),
-                                    row["heart_rate"], float(not math.isfinite(row["heart_rate"]))]
-            previous_time = row["time"]
+        add_raw_features(rows)
     training_rows = [row for rows in histories.values() for row in rows if row["split"] == "train"]
     catalogue = fit_catalogue(training_rows)
     scaler = fit_scaler(training_rows)
     for rows in histories.values():
         for row in rows:
             row["template"] = template_id(row, catalogue)
-            features = np.array(row["raw_features"], dtype=np.float64)
-            filled = np.where(np.isfinite(features), features, scaler["medians"])
-            row["features"] = ((filled - scaler["means"]) / scaler["scales"]).astype(np.float32)
+            row["features"] = scale_features(row["raw_features"], scaler)
     return histories, catalogue, scaler, dict(rejected)
 
 
@@ -232,6 +181,8 @@ def main():
             torch.save(model.state_dict(), args.output / "ranker.pt")
             best_epoch = epoch
     model.load_state_dict(torch.load(args.output / "ranker.pt", weights_only=True))
+    popularity = most_popular(training_sequences, list(range(1, catalogue["num_templates"] + 1)))
+    version = write_bundle(args.output, model, catalogue, scaler, popularity, args.history, args.max_speed)
     metrics = {}
     qualitative = []
     for split in ("validation", "test"):
@@ -252,7 +203,7 @@ def main():
               "examples": {split: len(values) for split, values in cases.items()},
               "best_epoch_by_validation_ndcg3": best_epoch, "training_curve": curve,
               "metrics": metrics, "qualitative_examples": qualitative,
-              "effort_head_trained": False,
+              "effort_head_trained": False, "model_version": version,
               "versions": {"torch": torch.__version__, "numpy": np.__version__}}
     (args.output / "results.json").write_text(json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     print(json.dumps({"best_epoch": best_epoch, "test": metrics["test"], "output": str(args.output)}, indent=2))
