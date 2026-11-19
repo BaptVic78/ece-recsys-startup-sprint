@@ -21,3 +21,7 @@ See [the first-results report](results/FIRST_RESULTS.md) for the trained GRU, ba
 ## Serving the trained model
 
 See [the serving guide](SERVING_README.md). The API serves the trained GRU from its saved bundle, filters categories by time budget and falls back to global popularity for new users.
+
+## Feedback loop
+
+See [the feedback-loop guide](FEEDBACK_README.md). Runners skip, complete and rate recommendations (too easy / OK / too hard). This re-ranks their next list at once, feeds retraining with a promotion gate, and is evaluated with a simulator in [the simulation report](results/FEEDBACK_SIMULATION.md).

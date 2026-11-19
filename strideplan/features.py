@@ -97,7 +97,18 @@ def describe_template(template, catalogue):
     speeds = [catalogue["speed_range_mps"][0], *catalogue["speed_edges_mps"], catalogue["speed_range_mps"][1]]
     low_minutes, high_minutes = durations[duration_band] / 60, durations[duration_band + 1] / 60
     low_kmh, high_kmh = speeds[speed_band] * 3.6, speeds[speed_band + 1] * 3.6
+    # Outer bounds are raw training extremes (GPS noise included), so titles name only the inner edge.
+    def span(low, high, band, count, unit, digits):
+        if count == 1:
+            return "any " + ("duration" if unit == "min" else "pace")
+        if band == 0:
+            return f"under {high:.{digits}f} {unit}"
+        if band == count - 1:
+            return f"over {low:.{digits}f} {unit}"
+        return f"{low:.{digits}f}-{high:.{digits}f} {unit}"
+    duration_text = span(low_minutes, high_minutes, duration_band, len(durations) - 1, "min", 0)
+    speed_text = span(low_kmh, high_kmh, speed_band, speed_count, "km/h", 1)
     return {"template_id": template,
             "duration_min_minutes": round(low_minutes, 1), "duration_max_minutes": round(high_minutes, 1),
             "speed_min_kmh": round(low_kmh, 1), "speed_max_kmh": round(high_kmh, 1),
-            "title": f"Run {low_minutes:.0f}-{high_minutes:.0f} min at {low_kmh:.1f}-{high_kmh:.1f} km/h"}
+            "title": f"Run {duration_text}, {speed_text}"}

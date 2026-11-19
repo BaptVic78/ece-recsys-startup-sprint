@@ -48,6 +48,6 @@ python -m unittest discover -s tests
 
 `MockApiTest` needs only FastAPI. The inference tests and `ModelApiTest` need PyTorch and build a small untrained bundle from synthetic sessions.
 
-## Next step
+## Feedback
 
-Phase 1 of the feedback loop: log every served ranking under a `rec_id`, then accept accept/reject/completed and effort feedback through new endpoints.
+Responses now carry a `rec_id`, and feedback is described in [the feedback-loop guide](FEEDBACK_README.md). When `artifacts/models/registry.json` exists, the API serves its current version.
