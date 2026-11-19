@@ -13,3 +13,7 @@ See [the pipeline guide](PIPELINE_README.md) for download commands, validation r
 See [the Week 2 guide](WEEK2_README.md) to run the model smoke check, ranking metrics and mock API.
 
 The model/API dependency set requires Python 3.12+. The standalone data pipeline supports Python 3.9+.
+
+## First results on real data
+
+See [the first-results report](results/FIRST_RESULTS.md) for the trained GRU, baseline comparisons, learning curves and reproduction commands. The first experiment predicts workout categories without time constraints; the API still serves its Week 2 mock catalogue.

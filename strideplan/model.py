@@ -8,8 +8,8 @@ from torch.nn.utils.rnn import pack_padded_sequence
 class WorkoutRanker(nn.Module):
     """Template IDs are 1..num_templates; 0 pads variable-length histories.
 
-    Session features are duration, speed, elevation gain, time since last session,
-    and heart rate, scaled by the caller using training-only preprocessing.
+    Session features and their order are defined by the caller's preprocessing.
+    Fit feature scaling using training data only.
     Returns ranking logits and effort logits for every candidate template.
     """
 
