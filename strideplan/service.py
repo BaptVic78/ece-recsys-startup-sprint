@@ -1,6 +1,8 @@
 """Recommendation service with feedback logging. Shared by the API and the simulator."""
 
+import math
 import random
+import statistics
 import threading
 import time
 
@@ -9,6 +11,14 @@ from strideplan.store import FeedbackError
 
 
 FEEDBACK_LOOKBACK_DAYS = 90
+
+
+def heart_rate(record):
+    try:
+        value = float(record.get("avg_heart_rate_bpm"))
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) and 0 < value <= 300 else None
 
 
 class StridePlanService:
@@ -26,10 +36,21 @@ class StridePlanService:
         return self.recommender.bundle.version
 
     def history(self, user_id):
-        """Known Endomondo history followed by sessions logged through the API."""
+        """Known Endomondo history followed by sessions logged through the API.
+
+        Almost every training session has heart rate, so a missing value flags an unusual run to the GRU and
+        shifts its predictions. Logged sessions without heart rate take the runner's recent median instead.
+        """
         if user_id is None:
             return []
-        return list(self.base_histories.get(user_id, [])) + self.store.sessions(user_id)
+        known = list(self.base_histories.get(user_id, []))
+        logged = self.store.sessions(user_id)
+        recent = [value for value in (heart_rate(record) for record in (known + logged)[-30:]) if value is not None]
+        if recent:
+            typical = statistics.median(recent)
+            logged = [{**record, "avg_heart_rate_bpm": typical} if heart_rate(record) is None else record
+                      for record in logged]
+        return known + logged
 
     def recent_feedback(self, user_id, now):
         if user_id is None:

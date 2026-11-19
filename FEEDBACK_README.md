@@ -29,7 +29,7 @@ Every served list is logged under a `rec_id` with the model version, the budget,
 - **Skips.** A skipped category loses 1.5 log-units. The penalty halves every 7 days.
 - **Effort.** The last 5 rated workouts give a bias. Each "too hard" counts −1 and each "too easy" +1, halving every 14 days. The bias shifts every category in proportion to its intensity: −1 for the shortest and slowest band, +1 for the longest and fastest.
 - **Learned effort.** Once a retrained model serves its effort head, categories predicted far from "ok" lose up to 1 log-unit.
-- **History.** A completed workout with its `session` enters the runner's history, so the GRU input changes too.
+- **History.** A completed workout with its `session` enters the runner's history, so the GRU input changes too. Almost every training run has heart rate. When a logged session has none, the runner's recent median is used. Otherwise the missing-heart-rate flag would mark the run as unusual to the GRU. In the first simulation this flag alone made the loop worse than no loop at all.
 - **Exploration.** In 10% of responses (`STRIDEPLAN_EPSILON`), the last slot shows another eligible category, marked `explored: true`. This limits the loop's tendency to show only what was already shown.
 
 ## Long loop: retraining with a promotion gate
@@ -76,6 +76,19 @@ Real users are not available, so `strideplan/simulate.py` builds virtual runners
 - **Short + retraining**: the short loop, plus one retraining halfway through.
 
 There are two scenarios: stable habits, and runners who now want lighter runs than their history. See [the simulation report](results/FEEDBACK_SIMULATION.md). The simulator is a behavioural model, not a measure of real-user benefit.
+
+### Results (300 runners, 8 rounds, 3 seeds, model `gru-498e31cda864`)
+
+| Last round | No loop | Short loop | Short + retraining |
+| --- | ---: | ---: | ---: |
+| List quality, stable habits | 0.757 | **0.811** | 0.811 |
+| Rated "too hard", stable habits | 3.7% | **2.3%** | 2.3% |
+| List quality, wants lighter runs | 0.750 | 0.769 | **0.770** |
+| Rated "too hard", wants lighter runs | 39.0% | 31.2% | **30.1%** |
+
+- **The short loop does most of the work.** In both scenarios it beats the model alone by more than the spread across seeds. It raises acceptance and MRR, and lowers the share of workouts rated too hard.
+- **Retraining adds little so far, and the gate is strict.** In the stable scenario, no candidate was promoted in 3 seeds: validation NDCG@3 dropped by more than 0.005 (0.360 to about 0.350). With lighter runs, 2 of 3 seeds were promoted, with a small held-out gain. The learned effort head was served once, when it beat the constant "ok" guess. Retraining needs more feedback, or a gentler fine-tuning, before it pays off.
+- **The first run of this simulation found a real serving bug.** Logged sessions without heart rate made the loop worse than no loop (list quality 0.57). They are now imputed, as described above.
 
 ## Limits
 

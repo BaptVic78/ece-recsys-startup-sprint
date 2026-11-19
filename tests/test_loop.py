@@ -1,6 +1,7 @@
 """Service, retraining and simulation on a small synthetic bundle. Requires PyTorch."""
 
 import json
+import statistics
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,7 +14,7 @@ from strideplan.inference import Recommender, load_histories
 from strideplan.reranker import NO_FEEDBACK, Policy
 from strideplan.retrain import RetrainConfig, register_base, retrain, save_candidate
 from strideplan.service import StridePlanService
-from strideplan.simulate import build_runners, run_arm
+from strideplan.simulate import build_runners, run_arm, typical_sessions
 from strideplan.retrain import featurize_histories
 from strideplan.store import FeedbackError, Store
 
@@ -57,6 +58,13 @@ class LoopTest(unittest.TestCase):
         self.assertTrue(result["session_logged"])
         self.assertEqual(len(self.service.history("runner")), len(self.histories["runner"]) + 1)
         self.assertEqual(self.store.sessions("runner")[0]["rec_id"], before["rec_id"])
+
+    def test_logged_session_without_heart_rate_uses_runner_median(self):
+        self.service.record_session("runner", {"start_timestamp": NOW, "duration_seconds": 2400, "avg_speed_mps": 3.0})
+        logged = self.service.history("runner")[-1]
+        known = [float(r["avg_heart_rate_bpm"]) for r in self.histories["runner"] if r["avg_heart_rate_bpm"]]
+        self.assertEqual(logged["avg_heart_rate_bpm"], statistics.median(known))
+        self.assertIsNone(self.store.sessions("runner")[0]["avg_heart_rate_bpm"])
 
     def test_sessions_need_a_user_and_a_completion(self):
         anonymous = self.service.recommend(None, 360, 2, now=NOW)
@@ -117,7 +125,8 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(list(runners), ["runner"])
         config = RetrainConfig(epochs=1, min_feedback=2, min_effort_labels=1)
         for arm in ("no_loop", "short_loop", "full_loop"):
-            result = run_arm(arm, self.bundle, self.histories, runners, 4, 1, 3, NOW, config)
+            result = run_arm(arm, self.bundle, self.histories, runners, 4, 1, 3, config,
+                             typical_sessions(rows))
             self.assertEqual(len(result["rounds"]), 4)
             for metric in ("acceptance", "mrr", "list_quality", "comfortable_share", "too_hard_share"):
                 self.assertTrue(0 <= result["rounds"][-1][metric] <= 1)

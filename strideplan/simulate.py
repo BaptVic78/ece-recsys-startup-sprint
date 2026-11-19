@@ -19,7 +19,7 @@ import json
 import math
 import random
 import statistics
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import asdict
 from pathlib import Path
 
@@ -49,8 +49,12 @@ def build_runners(histories, catalogue, count, comfort_shift, seed, minimum_sess
         taste = {t: (counts[t] + 0.5) for t in range(1, catalogue["num_templates"] + 1)}
         top = max(taste.values())
         comfort = statistics.median(intensity(t, catalogue) for t in recent) + comfort_shift
+        # Each runner continues two days after their own last run, so time gaps stay realistic for the GRU.
         runners[user] = {"taste": {t: value / top for t, value in taste.items()},
-                         "comfort": max(-1.0, min(1.0, comfort))}
+                         "comfort": max(-1.0, min(1.0, comfort)), "start": histories[user][-1]["time"] + 2 * 86400,
+                         "heart_rate": statistics.median(row["heart_rate"] for row in histories[user][-30:]
+                                                         if math.isfinite(row["heart_rate"])) if any(
+                             math.isfinite(row["heart_rate"]) for row in histories[user][-30:]) else None}
     return runners
 
 
@@ -66,11 +70,26 @@ def effort_rating(runner, template, catalogue, draw):
     return "too_hard" if distance > EFFORT_MARGIN else "too_easy" if distance < -EFFORT_MARGIN else "ok"
 
 
-def session_for(template, recommender, start):
-    item = recommender.templates[template]
-    minutes = (item["duration_min_minutes"] + item["duration_max_minutes"]) / 2
-    speed = (item["speed_min_kmh"] + item["speed_max_kmh"]) / 2 / 3.6
-    return {"start_timestamp": start, "duration_seconds": minutes * 60, "avg_speed_mps": speed}
+def typical_sessions(histories):
+    """Median training duration and speed of each category, so simulated runs look like real ones.
+
+    Band midpoints would be unrealistic for outer bands, whose bounds are raw training extremes.
+    """
+    values = defaultdict(lambda: ([], []))
+    for rows in histories.values():
+        for row in rows:
+            if row["split"] == "train":
+                values[row["template"]][0].append(row["duration"])
+                values[row["template"]][1].append(row["speed"])
+    return {template: (statistics.median(durations), statistics.median(speeds))
+            for template, (durations, speeds) in values.items()}
+
+
+def session_for(template, typical, start, heart_rate):
+    """Training sessions almost always have heart rate, so simulated runs carry the runner's median."""
+    duration, speed = typical[template]
+    return {"start_timestamp": start, "duration_seconds": duration, "avg_speed_mps": speed,
+            "avg_heart_rate_bpm": heart_rate}
 
 
 def list_quality(runner, served, eligible, catalogue):
@@ -82,9 +101,10 @@ def list_quality(runner, served, eligible, catalogue):
     return dcg / best if best else 0.0
 
 
-def run_arm(arm, bundle, base_histories, runners, rounds, seed, top_k, start_time, retrain_config):
+def run_arm(arm, bundle, base_histories, runners, rounds, seed, top_k, retrain_config, typical,
+            policy=Policy()):
     store = Store(":memory:")
-    policy = NO_FEEDBACK if arm == "no_loop" else Policy()
+    policy = NO_FEEDBACK if arm == "no_loop" else policy
     service = StridePlanService(Recommender(bundle), store, base_histories, policy, seed=seed)
     catalogue = bundle.catalogue
     per_round = []
@@ -101,7 +121,7 @@ def run_arm(arm, bundle, base_histories, runners, rounds, seed, top_k, start_tim
         totals = Counter()
         quality = []
         for user, runner in runners.items():
-            now = start_time + round_index * 3 * 86400 + 3600
+            now = runner["start"] + round_index * 3 * 86400
             budget = random.Random(f"{seed}:budget:{user}:{round_index}").choice(BUDGETS)
             result = service.recommend(user, budget, top_k, now=now)
             served = [item["template_id"] for item in result["recommendations"]]
@@ -123,7 +143,7 @@ def run_arm(arm, bundle, base_histories, runners, rounds, seed, top_k, start_tim
             position, template = picked
             rating = effort_rating(runner, template, catalogue,
                                    random.Random(f"{seed}:effort:{user}:{round_index}").random())
-            session = session_for(template, service.recommender, now + 1800) if arm != "no_loop" else None
+            session = session_for(template, typical, now + 1800, runner["heart_rate"]) if arm != "no_loop" else None
             service.record_feedback(result["rec_id"], template, "completed", rating, session, now=now + 7200)
             totals["picked"] += 1
             totals["reciprocal_rank"] += 1 / (position + 1)
@@ -207,7 +227,7 @@ def main():
     bundle = load_bundle(resolve_bundle_dir(args.bundle))
     base_histories = load_histories(args.data / "sessions.csv")
     rows = featurize_histories(base_histories, bundle.catalogue, bundle.scaler, bundle.max_speed)
-    start_time = max(row["time"] for user_rows in rows.values() for row in user_rows) + 86400
+    typical = typical_sessions(rows)
     retrain_config = RetrainConfig(epochs=1, replay_examples=args.replay_examples)
     scenarios = {"stable habits": 0.0, "wants lighter runs": -0.5}
     result = {"config": {"runners": args.runners, "rounds": args.rounds, "top_k": args.top_k, "seeds": args.seeds,
@@ -217,8 +237,8 @@ def main():
         runs = []
         for seed in args.seeds:
             runners = build_runners(rows, bundle.catalogue, args.runners, shift, seed)
-            run = {arm: run_arm(arm, bundle, base_histories, runners, args.rounds, seed, args.top_k, start_time,
-                                retrain_config) for arm in ARMS}
+            run = {arm: run_arm(arm, bundle, base_histories, runners, args.rounds, seed, args.top_k,
+                                retrain_config, typical) for arm in ARMS}
             runs.append(run)
             print(json.dumps({"scenario": scenario, "seed": seed,
                               **{arm: run[arm]["rounds"][-1] for arm in ARMS}}), flush=True)

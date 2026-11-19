@@ -118,7 +118,8 @@ class InferenceTest(unittest.TestCase):
                      "duration_range_seconds": [600.0, 6000.0], "speed_range_mps": [2.0, 4.0]}
         self.assertEqual(describe_template(4, catalogue),
                          {"template_id": 4, "duration_min_minutes": 40.0, "duration_max_minutes": 100.0,
-                          "speed_min_kmh": 9.0, "speed_max_kmh": 14.4, "title": "Run 40-100 min at 9.0-14.4 km/h"})
+                          "speed_min_kmh": 9.0, "speed_max_kmh": 14.4, "title": "Run over 40 min, over 9.0 km/h"})
+        self.assertEqual(describe_template(1, catalogue)["title"], "Run under 40 min, under 9.0 km/h")
         with self.assertRaises(ValueError):
             describe_template(5, catalogue)
 
