@@ -115,22 +115,34 @@ class LoopTest(unittest.TestCase):
             self.assertIn("promoted", payload["retrain"])
             self.assertEqual(resolve_bundle_dir(models), Path(models) / self.bundle.version)
 
+    def test_head_only_retraining_keeps_encoder_and_embeddings(self):
+        self.give_feedback()
+        config = RetrainConfig(epochs=1, min_feedback=10, min_effort_labels=100, trainable="head",
+                               learning_rate=1e-2, anchor_weight=0.1)
+        candidate, report = retrain(self.bundle, self.histories, self.store, config)
+        self.assertFalse(report["effort_head_trained"])
+        base = self.bundle.model.state_dict()
+        for name, tensor in candidate.state_dict().items():
+            moved = not torch.equal(tensor, base[name])
+            self.assertEqual(moved, name == "ranking_bias", name)
+
     def test_retraining_needs_enough_feedback(self):
         with self.assertRaises(ValueError):
             retrain(self.bundle, self.histories, self.store, RetrainConfig())
 
     def test_simulated_arms_share_runners_and_report_metrics(self):
         rows = featurize_histories(self.histories, self.bundle.catalogue, self.bundle.scaler, self.bundle.max_speed)
-        runners = build_runners(rows, self.bundle.catalogue, 5, -0.5, seed=1)
+        typical = typical_sessions(rows)
+        runners = build_runners(rows, self.bundle.catalogue, typical, 5, -1.0, seed=1)
         self.assertEqual(list(runners), ["runner"])
         config = RetrainConfig(epochs=1, min_feedback=2, min_effort_labels=1)
         for arm in ("no_loop", "short_loop", "full_loop"):
-            result = run_arm(arm, self.bundle, self.histories, runners, 4, 1, 3, config,
-                             typical_sessions(rows))
+            result = run_arm(arm, self.bundle, self.histories, runners, 4, 1, 3, config, typical,
+                             retrain_rounds=(1, 3))
             self.assertEqual(len(result["rounds"]), 4)
             for metric in ("acceptance", "mrr", "list_quality", "comfortable_share", "too_hard_share"):
                 self.assertTrue(0 <= result["rounds"][-1][metric] <= 1)
-            self.assertEqual(result["retrain"] is not None, arm == "full_loop")
+            self.assertEqual(len(result["retrains"]), 2 if arm == "full_loop" else 0)
 
     def test_no_feedback_policy_ignores_feedback(self):
         service = StridePlanService(Recommender(self.bundle), self.store, self.histories, NO_FEEDBACK)

@@ -34,7 +34,7 @@ from strideplan.store import EFFORT_TARGET, Store
 @dataclass(frozen=True)
 class RetrainConfig:
     epochs: int = 2
-    learning_rate: float = 3e-4
+    learning_rate: float = 1e-4
     batch_size: int = 256
     feedback_batch_size: int = 64
     feedback_weight: float = 1.0
@@ -43,7 +43,25 @@ class RetrainConfig:
     min_effort_labels: int = 20
     tolerance: float = 0.005
     replay_examples: int = 0
+    trainable: str = "all"
+    anchor_weight: float = 0.0
     seed: int = 42
+
+
+TRAINABLE = {
+    # Which ranking parameters move. The effort head follows its own rule (enough effort labels).
+    "all": ("templates", "encoder", "ranking_bias"),
+    "embeddings": ("templates", "ranking_bias"),
+    "head": ("ranking_bias",),
+}
+
+
+def select_trainable(model, trainable, train_effort):
+    if trainable not in TRAINABLE:
+        raise ValueError(f"trainable must be one of {sorted(TRAINABLE)}")
+    for name, parameter in model.named_parameters():
+        group = name.split(".")[0]
+        parameter.requires_grad_(train_effort if group == "effort_head" else group in TRAINABLE[trainable])
 
 
 def featurize_histories(records_by_user, catalogue, scaler, max_speed):
@@ -166,9 +184,11 @@ def retrain(bundle, base_histories, store, config=RetrainConfig()):
 
     candidate = WorkoutRanker(bundle.model.num_templates, bundle.model.feature_size, bundle.model.encoder.hidden_size)
     candidate.load_state_dict(bundle.model.state_dict())
-    for parameter in candidate.effort_head.parameters():
-        parameter.requires_grad_(train_effort or bundle.effort_head_trained)
-    optimizer = torch.optim.Adam([p for p in candidate.parameters() if p.requires_grad], lr=config.learning_rate)
+    select_trainable(candidate, config.trainable, train_effort or bundle.effort_head_trained)
+    trained = [(name, parameter) for name, parameter in candidate.named_parameters() if parameter.requires_grad]
+    # Anchor: an L2 pull towards the served weights, so fine-tuning cannot drift far from the validated model.
+    anchors = {name: parameter.detach().clone() for name, parameter in trained}
+    optimizer = torch.optim.Adam([parameter for _, parameter in trained], lr=config.learning_rate)
     generator = torch.Generator().manual_seed(config.seed)
     loader = DataLoader(tensors(replay, max_history), batch_size=config.batch_size, shuffle=True, generator=generator)
     sampler = random.Random(config.seed)
@@ -183,6 +203,9 @@ def retrain(bundle, base_histories, store, config=RetrainConfig()):
             loss = loss + feedback_loss(candidate, sampler.sample(train_cases, min(len(train_cases),
                                                                                   config.feedback_batch_size)),
                                         max_history, train_effort, config.feedback_weight)
+            if config.anchor_weight:
+                loss = loss + config.anchor_weight * sum(((parameter - anchors[name]) ** 2).sum()
+                                                         for name, parameter in trained)
             if not torch.isfinite(loss):
                 raise ValueError("Non-finite retraining loss")
             loss.backward()
@@ -253,6 +276,9 @@ def main():
     parser.add_argument("--replay-examples", type=int, default=RetrainConfig.replay_examples,
                         help="Sample of Endomondo training examples to replay; 0 replays all")
     parser.add_argument("--min-feedback", type=int, default=RetrainConfig.min_feedback)
+    parser.add_argument("--trainable", choices=sorted(TRAINABLE), default=RetrainConfig.trainable)
+    parser.add_argument("--learning-rate", type=float, default=RetrainConfig.learning_rate)
+    parser.add_argument("--anchor-weight", type=float, default=RetrainConfig.anchor_weight)
     parser.add_argument("--rollback", action="store_true", help="Serve the previously promoted model again")
     args = parser.parse_args()
     if args.rollback:
@@ -272,7 +298,9 @@ def main():
     store = Store(args.db)
     sessions = args.data / "sessions.csv"
     base_histories = load_histories(sessions) if sessions.is_file() else {}
-    config = RetrainConfig(epochs=args.epochs, replay_examples=args.replay_examples, min_feedback=args.min_feedback)
+    config = RetrainConfig(epochs=args.epochs, replay_examples=args.replay_examples, min_feedback=args.min_feedback,
+                           trainable=args.trainable, learning_rate=args.learning_rate,
+                           anchor_weight=args.anchor_weight)
     candidate, report = retrain(bundle, base_histories, store, config)
     version = save_candidate(args.models, candidate, bundle, report)
     registry = read_registry(args.models)

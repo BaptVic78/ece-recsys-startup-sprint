@@ -1,26 +1,26 @@
 # Feedback-loop simulation
 
-300 virtual runners, 8 rounds of 3 recommendations, 3 seeds. Comfort shifts: stable habits +0.00, wants lighter runs -0.50. Values are means across seeds of each scenario's last round, with standard deviation in brackets.
+300 virtual runners, 8 rounds of 3 recommendations, 3 seeds. Comfort shifts: stable habits +0.00, wants lighter runs -1.00. Values are means across seeds of each scenario's last round, with standard deviation in brackets.
 
 ## Scenario: stable habits
 
 | Arm | Acceptance | MRR | List quality (NDCG) | Rated OK | Rated too hard |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| No loop | 0.657 (0.017) | 0.555 (0.021) | 0.757 (0.005) | 0.828 (0.020) | 0.037 (0.003) |
-| Short loop | 0.677 (0.012) | 0.626 (0.011) | 0.811 (0.009) | 0.893 (0.018) | 0.023 (0.012) |
-| Short + retraining | 0.677 (0.012) | 0.626 (0.011) | 0.811 (0.009) | 0.893 (0.018) | 0.023 (0.012) |
+| No loop | 0.717 (0.019) | 0.618 (0.023) | 0.813 (0.005) | 0.974 (0.011) | 0.002 (0.002) |
+| Short loop | 0.719 (0.004) | 0.661 (0.015) | 0.822 (0.001) | 0.981 (0.010) | 0.002 (0.002) |
+| Short + retraining | 0.714 (0.010) | 0.659 (0.019) | 0.821 (0.001) | 0.983 (0.009) | 0.002 (0.002) |
 
-Retraining promoted the candidate in 0 of 3 seeds; the learned effort head was served in 0.
+Retraining promoted 2 of 9 candidates; the learned effort head was served in 0.
 
 ## Scenario: wants lighter runs
 
 | Arm | Acceptance | MRR | List quality (NDCG) | Rated OK | Rated too hard |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| No loop | 0.534 (0.032) | 0.406 (0.028) | 0.750 (0.005) | 0.581 (0.026) | 0.390 (0.025) |
-| Short loop | 0.553 (0.029) | 0.449 (0.027) | 0.769 (0.007) | 0.668 (0.026) | 0.312 (0.018) |
-| Short + retraining | 0.557 (0.035) | 0.450 (0.032) | 0.770 (0.009) | 0.676 (0.015) | 0.301 (0.011) |
+| No loop | 0.610 (0.024) | 0.481 (0.023) | 0.799 (0.007) | 0.789 (0.032) | 0.205 (0.035) |
+| Short loop | 0.598 (0.024) | 0.510 (0.026) | 0.799 (0.004) | 0.839 (0.038) | 0.156 (0.036) |
+| Short + retraining | 0.602 (0.036) | 0.521 (0.035) | 0.808 (0.004) | 0.845 (0.043) | 0.150 (0.041) |
 
-Retraining promoted the candidate in 2 of 3 seeds; the learned effort head was served in 1.
+Retraining promoted 4 of 9 candidates; the learned effort head was served in 0.
 
 ## Reading this
 

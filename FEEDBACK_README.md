@@ -39,6 +39,8 @@ python -m strideplan.retrain
 python -m strideplan.retrain --rollback
 ```
 
+Options: `--learning-rate` (default 1e-4), `--trainable all|embeddings|head` (which ranking weights move), `--anchor-weight` (L2 pull towards the served weights). The defaults come from the retraining comparison below.
+
 - The model is fine-tuned from the served weights. The catalogue and scaler are kept, so category IDs never change.
 - Completed and accepted workouts are positives (cross-entropy). Skips lower the skipped category's probability (unlikelihood). Endomondo training examples are replayed alongside the feedback so the model does not forget the original task.
 - The effort head is trained only once there are at least 20 effort ratings. It is served only if it beats a constant "ok" guess on held-out ratings.
@@ -67,28 +69,65 @@ In `/docs`:
 
 ```text
 python -m strideplan.simulate
+python -m strideplan.retrain_ablation
 ```
 
-Real users are not available, so `strideplan/simulate.py` builds virtual runners from Endomondo histories. Each has a category taste and a comfort intensity, and examines lists, skips, completes and rates workouts. Three arms share the same runners, budgets and random draws:
+Real users are not available, so `strideplan/simulate.py` builds virtual runners from Endomondo histories.
 
+- **Taste.** Each runner's taste comes from the categories of their last 30 runs.
+- **Personal load.** A category's load for a runner is the mean z-score of its typical training session (log duration and log speed) against that runner's own median and spread.
+- **Effort.** Ratings come from that load. It deliberately does not use the re-ranker's band-intensity scale. An earlier version did, which made part of the effort gain true by construction.
+
+Three arms share the same runners, budgets and random draws:
 - **No loop**: the model only;
 - **Short loop**: re-ranking, logged history and exploration;
-- **Short + retraining**: the short loop, plus one retraining halfway through.
+- **Short + retraining**: the short loop, plus retraining before rounds 3, 5 and 7, each through the promotion gate.
 
-There are two scenarios: stable habits, and runners who now want lighter runs than their history. See [the simulation report](results/FEEDBACK_SIMULATION.md). The simulator is a behavioural model, not a measure of real-user benefit.
+There are two scenarios: stable habits, and runners who now want runs one spread lighter than usual. See [the simulation report](results/FEEDBACK_SIMULATION.md).
 
 ### Results (300 runners, 8 rounds, 3 seeds, model `gru-498e31cda864`)
 
 | Last round | No loop | Short loop | Short + retraining |
 | --- | ---: | ---: | ---: |
-| List quality, stable habits | 0.757 | **0.811** | 0.811 |
-| Rated "too hard", stable habits | 3.7% | **2.3%** | 2.3% |
-| List quality, wants lighter runs | 0.750 | 0.769 | **0.770** |
-| Rated "too hard", wants lighter runs | 39.0% | 31.2% | **30.1%** |
+| List quality, stable habits | 0.813 | **0.822** | 0.821 |
+| MRR, stable habits | 0.618 | **0.661** | 0.659 |
+| List quality, wants lighter runs | 0.799 | 0.799 | **0.808** |
+| MRR, wants lighter runs | 0.481 | 0.510 | **0.521** |
+| Rated "too hard", wants lighter runs | 20.5% | 15.6% | **15.0%** |
 
-- **The short loop does most of the work.** In both scenarios it beats the model alone by more than the spread across seeds. It raises acceptance and MRR, and lowers the share of workouts rated too hard.
-- **Retraining adds little so far, and the gate is strict.** In the stable scenario, no candidate was promoted in 3 seeds: validation NDCG@3 dropped by more than 0.005 (0.360 to about 0.350). With lighter runs, 2 of 3 seeds were promoted, with a small held-out gain. The learned effort head was served once, when it beat the constant "ok" guess. Retraining needs more feedback, or a gentler fine-tuning, before it pays off.
-- **The first run of this simulation found a real serving bug.** Logged sessions without heart rate made the loop worse than no loop (list quality 0.57). They are now imputed, as described above.
+Seed standard deviations are about 0.001 to 0.007 for list quality and 3 to 4 points for "too hard". See the report.
+
+- **The short loop helps, modestly.**
+  - It raises MRR in both scenarios: runners find a category they want higher in the list.
+  - It cuts "too hard" ratings by about 5 points for runners who want lighter work, about 1.4 standard deviations.
+  - List quality moves little.
+- **Retraining helps only when needs change.** With lighter runs, it adds about 0.009 list quality over the short loop. With stable habits, it adds nothing, and the gate promoted 2 of 9 candidates.
+- **The learned effort head was never served.** Most ratings are "ok", and a constant "ok" guess stays hard to beat.
+
+### Retraining set-ups
+
+`strideplan.retrain_ablation` compares retraining variants against the short loop on the same runners: 2 scenarios × 2 seeds, 300 runners. The full table is in `results/retrain_ablation.json`.
+
+| Variant | List quality vs short loop | "Too hard" | Promoted | Validation NDCG@3 change |
+| --- | ---: | ---: | ---: | ---: |
+| All weights, lr 3e-4, once (previous default) | +0.002 | −0.2 pt | 1/4 | −0.005 |
+| All weights, lr 3e-4, 3 times | +0.006 | −0.6 pt | 2/12 | −0.005 |
+| **All weights, lr 1e-4, 3 times (default)** | **+0.006** | −0.4 pt | **5/12** | **−0.003** |
+| L2 anchor to served weights | +0.003 | −1.0 pt | 2/12 | −0.005 |
+| Frozen GRU (`--trainable embeddings`) | +0.004 | −0.4 pt | 5/12 | −0.000 |
+| Ranking bias only (`--trainable head`) | +0.001 | −0.1 pt | 7/12 | +0.001 |
+
+All gains are within seed noise.
+
+- Fine-tuning the whole network keeps drifting away from the original task: validation NDCG@3 drops by 0.003 to 0.005. The best base checkpoint was selected on validation, so further training on replayed data tends to overfit.
+- Freezing the GRU, or training only the ranking bias, preserves validation. They also learn less from feedback.
+- The default is now a lower learning rate (1e-4) with repeated retraining.
+- The honest conclusion is that the short loop delivers most of the benefit. Retraining is a safe pipeline: the gate never served a candidate that lost more than 0.005 validation NDCG@3. It does not yet bring a measurable gain.
+
+### Bugs the simulation found
+
+- **Missing heart rate in logged sessions.** It made the loop worse than no loop (list quality 0.57 against 0.76). Logged sessions now take the runner's recent median heart rate.
+- **Circular effort model.** An effort model that reused the re-ranker's intensity scale inflated the early results: list quality 0.76 to 0.81, "too hard" 39% to 31%. The figures above use the independent personal-load model.
 
 ## Limits
 
