@@ -14,6 +14,7 @@ from strideplan.model import WorkoutRanker
 BUNDLE_FILE = "bundle.json"
 WEIGHTS_FILE = "ranker.pt"
 BUNDLE_FORMAT = 1
+REGISTRY_FILE = "registry.json"
 
 
 @dataclass(frozen=True)
@@ -25,13 +26,16 @@ class Bundle:
     max_history: int
     max_speed: float
     version: str
+    effort_head_trained: bool = False
+    lineage: tuple = ()
 
 
 def model_version(weights_path):
     return "gru-" + hashlib.sha256(Path(weights_path).read_bytes()).hexdigest()[:12]
 
 
-def write_bundle(directory, model, catalogue, scaler, popularity, max_history, max_speed):
+def write_bundle(directory, model, catalogue, scaler, popularity, max_history, max_speed,
+                 effort_head_trained=False, lineage=(), extra=None):
     """Describe the weights already saved in directory/ranker.pt. Inputs must come from training data only."""
     directory = Path(directory)
     weights = directory / WEIGHTS_FILE
@@ -44,7 +48,8 @@ def write_bundle(directory, model, catalogue, scaler, popularity, max_history, m
                "architecture": {"num_templates": model.num_templates, "feature_size": model.feature_size,
                                 "hidden_size": model.encoder.hidden_size},
                "catalogue": catalogue, "preprocessing": scaler, "global_popularity": list(popularity),
-               "max_history": max_history, "max_speed_mps": max_speed, "effort_head_trained": False}
+               "max_history": max_history, "max_speed_mps": max_speed, "effort_head_trained": bool(effort_head_trained),
+               "lineage": list(lineage), **(extra or {})}
     (directory / BUNDLE_FILE).write_text(json.dumps(payload, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     return version
 
@@ -68,4 +73,27 @@ def load_bundle(directory):
     model.eval()
     return Bundle(model=model, catalogue=payload["catalogue"], scaler=payload["preprocessing"],
                   popularity=payload["global_popularity"], max_history=payload["max_history"],
-                  max_speed=payload["max_speed_mps"], version=version)
+                  max_speed=payload["max_speed_mps"], version=version,
+                  effort_head_trained=payload.get("effort_head_trained", False),
+                  lineage=tuple(payload.get("lineage", ())))
+
+
+def resolve_bundle_dir(path):
+    """A registry directory resolves to its current bundle; a bundle directory resolves to itself."""
+    path = Path(path)
+    registry = path / REGISTRY_FILE
+    if registry.is_file():
+        return path / json.loads(registry.read_text(encoding="utf-8"))["current"]
+    return path
+
+
+def read_registry(models_dir):
+    registry = Path(models_dir) / REGISTRY_FILE
+    return json.loads(registry.read_text(encoding="utf-8")) if registry.is_file() else {"current": None, "history": []}
+
+
+def write_registry(models_dir, registry):
+    registry_path = Path(models_dir) / REGISTRY_FILE
+    temporary = registry_path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(registry, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    temporary.replace(registry_path)

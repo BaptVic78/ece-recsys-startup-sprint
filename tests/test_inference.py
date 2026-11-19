@@ -81,7 +81,7 @@ class InferenceTest(unittest.TestCase):
             for records in ([], [dict(start_timestamp=1, duration_seconds=600, avg_speed_mps=None)]):
                 result = recommender.rank(records)
                 self.assertEqual(result["strategy"], "global_popularity")
-                self.assertEqual([template for template, _ in result["ranking"]], recommender.bundle.popularity)
+                self.assertEqual([item["template_id"] for item in result["ranking"]], recommender.bundle.popularity)
 
     def test_history_ranking_covers_catalogue_with_probabilities(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -92,9 +92,10 @@ class InferenceTest(unittest.TestCase):
             self.assertEqual(result["strategy"], "gru")
             self.assertEqual(result["history_sessions_used"], 4)
             ranking = result["ranking"]
-            self.assertEqual(sorted(template for template, _ in ranking),
+            self.assertEqual(sorted(item["template_id"] for item in ranking),
                              list(range(1, recommender.catalogue["num_templates"] + 1)))
-            scores = [score for _, score in ranking]
+            self.assertTrue(all(item["predicted_effort"] is None for item in ranking))
+            scores = [item["score"] for item in ranking]
             self.assertAlmostEqual(sum(scores), 1.0, places=5)
             self.assertEqual(scores, sorted(scores, reverse=True))
 

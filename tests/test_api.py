@@ -40,10 +40,15 @@ class MockApiTest(unittest.TestCase):
 
     def test_health_and_openapi(self):
         self.assertEqual(self.client.get("/health").json(),
-                         {"status": "ok", "mode": "mock", "model_version": None, "known_users": 0})
+                         {"status": "ok", "mode": "mock", "model_version": None, "known_users": 0, "logged": None})
         paths = self.client.get("/openapi.json").json()["paths"]
         self.assertIn("/recommend", paths)
         self.assertIn("/catalogue", paths)
+        self.assertIn("/feedback", paths)
+
+    def test_feedback_needs_a_model(self):
+        response = self.client.post("/feedback", json={"rec_id": "x", "template_id": "1", "action": "rejected"})
+        self.assertEqual(response.status_code, 503)
 
 
 class ModelApiTest(unittest.TestCase):
@@ -54,7 +59,8 @@ class ModelApiTest(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         build_bundle(self.directory.name)
         self.client = TestClient(create_app(bundle_dir=self.directory.name,
-                                            sessions_path=Path(self.directory.name) / "sessions.csv"))
+                                            sessions_path=Path(self.directory.name) / "sessions.csv",
+                                            db_path=":memory:", epsilon=0.0))
 
     def tearDown(self):
         self.directory.cleanup()
@@ -83,6 +89,50 @@ class ModelApiTest(unittest.TestCase):
         result = self.client.post("/recommend", json={"user_id": "runner", "max_duration_minutes": 360,
                                                       "history": history}).json()
         self.assertEqual((result["strategy"], result["history_sessions_used"]), ("gru", 3))
+
+    def test_feedback_round_trip_changes_next_recommendation(self):
+        first = self.client.post("/recommend", json={"user_id": "runner", "max_duration_minutes": 360,
+                                                     "top_k": 3}).json()
+        self.assertIsNotNone(first["rec_id"])
+        top = first["recommendations"][0]["template_id"]
+        response = self.client.post("/feedback", json={"rec_id": first["rec_id"], "template_id": top,
+                                                       "action": "rejected"})
+        self.assertEqual(response.status_code, 200)
+        second = self.client.post("/recommend", json={"user_id": "runner", "max_duration_minutes": 360,
+                                                      "top_k": 3}).json()
+        self.assertNotEqual(second["recommendations"][0]["template_id"], top)
+        self.assertTrue(second["feedback_applied"])
+        lowered = [item for item in second["recommendations"] if item["template_id"] == top]
+        self.assertTrue(all("skipped" in " ".join(item["reasons"]) for item in lowered))
+        done = second["recommendations"][0]
+        session = {"start_timestamp": 2_000_000_000, "duration_seconds": 1800, "avg_speed_mps": 3.0}
+        response = self.client.post("/feedback", json={"rec_id": second["rec_id"], "template_id": done["template_id"],
+                                                       "action": "completed", "effort": "too_hard",
+                                                       "session": session})
+        self.assertEqual(response.json()["session_logged"], True)
+        history = self.client.get("/users/runner/history").json()
+        self.assertEqual((history["known_sessions"], len(history["logged_sessions"]), len(history["feedback"])),
+                         (13, 1, 2))
+        self.assertEqual(self.client.get("/health").json()["logged"],
+                         {"recommendations": 2, "feedback": 2, "sessions": 1})
+
+    def test_invalid_feedback_is_rejected(self):
+        first = self.client.post("/recommend", json={"user_id": "runner", "max_duration_minutes": 360}).json()
+        template = first["recommendations"][0]["template_id"]
+        for payload in ({"rec_id": "unknown", "template_id": template, "action": "rejected"},
+                        {"rec_id": first["rec_id"], "template_id": "abc", "action": "rejected"},
+                        {"rec_id": first["rec_id"], "template_id": template, "action": "rejected", "effort": "ok"},
+                        {"rec_id": first["rec_id"], "template_id": template, "action": "completed", "effort": "hard"}):
+            with self.subTest(payload=payload):
+                self.assertEqual(self.client.post("/feedback", json=payload).status_code, 422)
+
+    def test_logged_session_endpoint(self):
+        session = {"workout_id": "w1", "start_timestamp": 2_000_000_000, "duration_seconds": 1800,
+                   "avg_speed_mps": 3.0}
+        self.assertTrue(self.client.post("/sessions", json={"user_id": "runner", "session": session}).json()
+                        ["session_logged"])
+        self.assertFalse(self.client.post("/sessions", json={"user_id": "runner", "session": session}).json()
+                         ["session_logged"])
 
     def test_catalogue_lists_every_category(self):
         catalogue = self.client.get("/catalogue").json()

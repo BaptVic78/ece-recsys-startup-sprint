@@ -39,34 +39,42 @@ class Recommender:
                           for template in range(1, self.catalogue["num_templates"] + 1)}
 
     def rank(self, records):
-        """Rank every template. Users with no usable session receive global popularity."""
+        """Rank every template. Users with no usable session receive global popularity.
+
+        predicted_effort is the effort head's 0 (too easy) to 1 (too hard) estimate, only once it is trained.
+        """
         templates, features = encode_history(records, self.catalogue, self.bundle.scaler,
                                              self.bundle.max_speed, self.bundle.max_history)
         if not templates:
             return {"strategy": "global_popularity", "history_sessions_used": 0,
-                    "ranking": [(template, None) for template in self.bundle.popularity]}
+                    "ranking": [{"template_id": template, "score": None, "predicted_effort": None}
+                                for template in self.bundle.popularity]}
         items = torch.tensor([templates], dtype=torch.long)
         values = torch.from_numpy(np.stack(features))[None]
         with torch.no_grad():
-            logits, _ = self.bundle.model(items, values, torch.tensor([len(templates)]))
+            logits, effort_logits = self.bundle.model(items, values, torch.tensor([len(templates)]))
         probabilities = torch.softmax(logits[0], dim=0)
+        efforts = torch.sigmoid(effort_logits[0]) if self.bundle.effort_head_trained else None
         # Stable sort resolves ties by ascending template ID, as in offline evaluation.
         order = torch.argsort(logits[0], descending=True, stable=True) + 1
         return {"strategy": "gru", "history_sessions_used": len(templates),
-                "ranking": [(int(template), float(probabilities[template - 1])) for template in order]}
+                "ranking": [{"template_id": int(template), "score": float(probabilities[template - 1]),
+                             "predicted_effort": None if efforts is None else float(efforts[template - 1])}
+                            for template in order]}
 
-    def recommend(self, records, max_duration_minutes, top_k):
-        """Keep categories whose shortest duration fits the budget, cap their duration, then cut to top_k."""
-        result = self.rank(records)
-        recommendations = []
-        for template, score in result["ranking"]:
-            description = self.templates[template]
+    def within_budget(self, ranking, max_duration_minutes):
+        """Keep categories whose shortest duration fits the budget and cap their upper duration to it."""
+        result = []
+        for item in ranking:
+            description = self.templates[item["template_id"]]
             if description["duration_min_minutes"] > max_duration_minutes:
                 continue
-            recommendations.append({**description, "score": score,
-                                    "duration_max_minutes": min(description["duration_max_minutes"],
-                                                                max_duration_minutes)})
-            if len(recommendations) == top_k:
-                break
+            result.append({**description, **item,
+                           "duration_max_minutes": min(description["duration_max_minutes"], max_duration_minutes)})
+        return result
+
+    def recommend(self, records, max_duration_minutes, top_k):
+        """Model ranking only, without feedback adjustments."""
+        result = self.rank(records)
         return {"strategy": result["strategy"], "history_sessions_used": result["history_sessions_used"],
-                "recommendations": recommendations}
+                "recommendations": self.within_budget(result["ranking"], max_duration_minutes)[:top_k]}
