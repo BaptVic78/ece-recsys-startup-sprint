@@ -1,31 +1,111 @@
-# RecSys Startup Sprint
+# StridePlan: a marathon training recommender
 
-Build and demo an MVP based on a technique from a RecSys research paper. Select the paper and dataset before implementing the model.
+StridePlan recommends a marathon runner's next training sessions. You declare your race date. Every day you plan to run, the app ranks 66 session types for you and turns the best ones into concrete sessions (distance, pace, duration). It also builds the coming week. Log a completed, skipped or missed session and the next recommendations change.
 
-Plan for offline ranking evaluation, interaction logging, model serving and a four-week demo milestone.
+The model is a **context-aware sequential Transformer** after CARCA (Rashed, Elsayed & Schmidt-Thieme, *Context and Attribute-Aware Sequential Recommendation via Cross-Attention*, RecSys 2022). It was trained on 1.2 million sessions of 15,518 runners who completed a 2019 World Marathon Major. The data is the public [BMClab dataset](https://figshare.com/articles/dataset/A_public_dataset_on_long-distance_running_training_in_2019_and_2020/16620238) (CC BY 4.0). The innovation is the **race-calendar context**: the model knows how many weeks remain before your race and how long ago your last race was. It therefore recommends differently in build-up, peak, taper and recovery. An ablation without that context measures the gain.
 
-## StridePlan data preparation
+**Results:** see [results/marathon/MARATHON_RESULTS.md](results/marathon/MARATHON_RESULTS.md). **Method, data and leakage policy:** see [MARATHON_README.md](MARATHON_README.md).
 
-See [the pipeline guide](PIPELINE_README.md) for download commands, validation rules, chronological splits, and exports.
+## Team
 
-## Week 2 model, evaluation and API
+| Member | Role |
+| --- | --- |
+| _to fill_ | Project Lead (evaluation harness, model-specific preprocessing) |
+| _to fill_ | Data Engineer (BMClab pipeline, SQLite store, `/log_interaction`) |
+| _to fill_ | Lead ML Engineer (CARCA-style model) |
+| _to fill_ | ML Engineer (training loop, checkpoints, predict functions) |
+| _to fill_ | Systems Engineer (FastAPI backend, Streamlit frontend, deployment) |
 
-See [the Week 2 guide](WEEK2_README.md) to run the model smoke check, ranking metrics and mock API.
+## Run the system locally (about 5 minutes)
 
-The model/API dependency set requires Python 3.12+. The standalone data pipeline supports Python 3.9+.
+The trained model (`models/marathon/`) and a demo sample of 12 test-period runners (`demo/`) are in the repository, so running the app needs no dataset download.
 
-## First results on real data
+1. Clone the repository and enter it.
 
-See [the first-results report](results/FIRST_RESULTS.md) for the trained GRU, baseline comparisons, learning curves and reproduction commands. The first experiment predicts workout categories without time constraints.
+   ```text
+   git clone https://github.com/BaptVic78/ece-recsys-startup-sprint.git
+   cd ece-recsys-startup-sprint
+   ```
 
-## Serving the trained model
+2. Create a virtual environment with Python 3.12 or newer, and activate it.
 
-See [the serving guide](SERVING_README.md). The API serves the trained GRU from its saved bundle, filters categories by time budget and falls back to global popularity for new users.
+   ```text
+   python -m venv .venv
+   .venv\Scripts\activate        (Windows)
+   source .venv/bin/activate     (macOS / Linux)
+   ```
 
-## Feedback loop
+3. Install the dependencies. PyTorch comes first from its CPU index (about 200 MB).
 
-See [the feedback-loop guide](FEEDBACK_README.md). Runners skip, complete and rate recommendations (too easy / OK / too hard). This re-ranks their next list at once, feeds retraining with a promotion gate, and is evaluated with a simulator in [the simulation report](results/FEEDBACK_SIMULATION.md).
+   ```text
+   python -m pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
+   python -m pip install -r requirements.txt
+   ```
 
-## Marathon plan recommender (new direction)
+4. Start the API in a first terminal.
 
-See [the marathon guide](MARATHON_README.md). The project is moving to marathon training plans learned from 16,121 real 2019 marathon preparations in the public BMClab dataset. The model is a context-aware sequential Transformer (CARCA, RecSys 2022) trained on 2.2 million sessions of 15,518 marathon runners.
+   ```text
+   python -m uvicorn marathon.api:app --host 0.0.0.0 --port 8000
+   ```
+
+   The API docs are at http://localhost:8000/docs.
+
+5. Start the frontend in a second terminal, with the virtual environment activated.
+
+   ```text
+   python -m streamlit run frontend/app.py
+   ```
+
+6. Open http://localhost:8501. In the sidebar, load a demo runner (or create your own profile), then look at today's ranked sessions and the 7-day plan. Click **Done**, **Skip top pick** or **Missed the day** and the recommendations update. Every click is a `POST /log_interaction`, stored in `artifacts/marathon/interactions.sqlite3`.
+
+To use the app from another machine on the same Wi-Fi, run step 5 with `MARATHON_API=http://<server-ip>:8000` set, then open `http://<server-ip>:8501`.
+
+## API
+
+| Endpoint | Role |
+| --- | --- |
+| `GET /health` | Status and model version |
+| `GET /catalogue` | The 66 session types |
+| `POST /users` | Create a runner: race date, optional goal time, recent sessions |
+| `GET /users/{user_id}` | Profile, sessions and interaction log |
+| `POST /recommend` | Ranked session types for one day, from the trained model |
+| `POST /plan` | Next days on the chosen weekdays, rolled forward with the model |
+| `POST /log_interaction` | `completed` (with km, minutes and optional effort), `skipped` or `missed`; written to SQLite |
+| `GET /demo/runners`, `POST /demo/{runner}/load` | Demo runners from the test period |
+
+Runners with fewer than 5 logged sessions get the training popularity of their preparation phase (`strategy: "phase_popularity"`), because the model was trained with at least 5 sessions of history. Everyone else gets the model (`strategy: "model"`).
+
+## Retrain the model (optional, about 2 hours on a laptop CPU)
+
+```text
+python -m marathon.download          # 155 MB, checked against the published MD5
+python -m marathon.data              # sessions, session types, race calendar, temporal split
+python -m marathon.validate          # leakage and consistency checks
+python -m marathon.train             # full model, saved to models/marathon/full.pt
+python -m marathon.train --no-race-context   # ablation
+python -m marathon.serving           # cold-start fallback from training data only
+python -m marathon.report            # results/marathon/MARATHON_RESULTS.md and learning curves
+python -m marathon.demo              # demo sample
+```
+
+## Tests
+
+```text
+python -m unittest discover -s tests
+```
+
+The tests cover leakage (temporal split, histories strictly before targets, a causal pace reference), the ablation being blind to the race calendar, ranking ties, the baselines, and train/serve consistency. They also run the API end to end with SQLite and check latency.
+
+## Repository
+
+| Path | Content |
+| --- | --- |
+| `marathon/` | Data pipeline, model, training, evaluation, serving, API |
+| `frontend/app.py` | Streamlit frontend |
+| `models/marathon/` | Trained checkpoints and their configurations |
+| `demo/` | Demo sample of 12 test-period runners (BMClab, CC BY 4.0) |
+| `results/marathon/` | Offline results, learning curves, ablation |
+| `tests/` | Unit and end-to-end tests |
+| `strideplan/`, `strideplan_pipeline/` | Earlier Endomondo prototype (Weeks 1–3), kept for reference: [first results](results/FIRST_RESULTS.md), [serving](SERVING_README.md), [feedback loop](FEEDBACK_README.md) |
+
+Data: Afonseca, Watanabe & Duarte (2022), *A public dataset on long-distance running training in 2019 and 2020*, figshare, CC BY 4.0, [PeerJ 10:e13192](https://peerj.com/articles/13192).
