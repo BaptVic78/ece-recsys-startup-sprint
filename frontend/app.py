@@ -96,7 +96,7 @@ st.subheader(f"Recommended sessions for {today:%A %d %B}")
 st.caption(f"Strategy: {recommendation['strategy']} · {recommendation['history_sessions']} sessions of history · "
            f"answered in {recommendation['latency_ms']} ms")
 table = pd.DataFrame(recommendation["recommendations"])[["rank", "title", "distance_range", "pace", "minutes", "score"]]
-st.dataframe(table, hide_index=True, use_container_width=True)
+st.dataframe(table, hide_index=True, width="stretch")
 
 top = recommendation["recommendations"][0]
 st.markdown(f"**Log what you did on {today:%d %B}**")
@@ -122,9 +122,9 @@ if run_days:
              "session": day["recommendations"][0]["title"], "pace": day["recommendations"][0]["pace"],
              "minutes": day["recommendations"][0]["minutes"],
              "alternatives": " · ".join(item["title"] for item in day["recommendations"][1:])} for day in plan["days"]]
-    st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     st.caption("The plan is rolled forward with the model: each day's top session is assumed done before ranking the "
                "next one. Logging a missed day or a different session changes the next plan.")
 
 with st.expander("Interaction log (stored in SQLite through /log_interaction)"):
-    st.dataframe(pd.DataFrame(user["interactions"]), hide_index=True, use_container_width=True)
+    st.dataframe(pd.DataFrame(user["interactions"]), hide_index=True, width="stretch")
