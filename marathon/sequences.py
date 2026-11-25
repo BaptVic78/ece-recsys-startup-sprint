@@ -69,7 +69,7 @@ class SessionStore:
             np.log1p(sessions["km"].to_numpy()),
             np.clip(sessions["intensity"].to_numpy(), 0.5, 1.5) * 10 - 10,
             np.log1p(gap)]).astype(np.float32)
-        self.weekday = sessions["date"].dt.weekday.to_numpy().astype(np.int64)
+        self.weekday = sessions["date"].dt.day_of_week.to_numpy().astype(np.int64)
         self.race_bucket = race_bucket(sessions["days_to_race"].to_numpy())
         # Days since the most recent earlier-or-same-day race of this runner, computed causally.
         race_index = np.where(sessions["is_race"].to_numpy(), np.arange(len(athlete)), -1)
