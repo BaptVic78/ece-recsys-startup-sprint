@@ -1,8 +1,12 @@
-"""Extract labelled 2019 marathons and the training that preceded them from BMClab daily data.
+"""Build the session catalogue, the race calendar and the temporal split from BMClab daily data.
 
-A case is one runner's World Marathon Major in 2019. Its label is the race-day duration.
-Its history is the daily distance and duration in the days strictly before race day.
-Splits are by athlete, so a runner's races never appear in two splits.
+Users are runners who completed a 2019 World Marathon Major. Interactions are their running days
+(one session per day, as the source stores daily totals). Each session is mapped to one of 66
+session types: a distance band crossed with an intensity band, the intensity being the session's
+pace relative to the runner's own median pace over the 28 days strictly before it.
+
+The split is a global temporal cutoff: train before 1 August 2019, validation in August,
+test from 1 September. Band edges are fixed in advance, so nothing is fitted on later data.
 """
 
 import argparse
@@ -21,9 +25,37 @@ RACES = {
     "CHICAGO 2019": "2019-10-13",
     "NEW YORK 2019": "2019-11-03",
 }
-MAX_HISTORY_DAYS = 140
+SPLIT_STARTS = {"validation": "2019-08-01", "test": "2019-09-01"}
+MIN_SESSION_KM = 1.0
 # Days whose average pace is outside this range (min/km) are treated as recording errors.
 PACE_RANGE = (2.5, 15.0)
+# Session types. Distance bands in km: [1,5), [5,8), ..., [35, inf). Intensity bands are the
+# ratio of session pace to the runner's trailing median pace: below 0.90 is much faster than usual.
+DISTANCE_EDGES = [5, 8, 10, 12, 15, 18, 21, 25, 30, 35]
+INTENSITY_EDGES = [0.90, 0.95, 0.99, 1.03, 1.08]
+INTENSITY_LABELS = ["much faster", "faster", "slightly faster", "usual", "slightly easier", "easier"]
+REFERENCE_DAYS = 28
+REFERENCE_MIN_RUNS = 3
+NUM_ITEMS = (len(DISTANCE_EDGES) + 1) * (len(INTENSITY_EDGES) + 1)
+
+
+def item_id(km, intensity):
+    """Session type ID in 1..NUM_ITEMS. Values equal to an edge go to the higher band."""
+    distance_band = np.searchsorted(DISTANCE_EDGES, km, side="right")
+    intensity_band = np.searchsorted(INTENSITY_EDGES, intensity, side="right")
+    return 1 + distance_band * (len(INTENSITY_EDGES) + 1) + intensity_band
+
+
+def describe_item(item):
+    """Human-readable distance range and intensity of a session type."""
+    distance_band, intensity_band = divmod(int(item) - 1, len(INTENSITY_EDGES) + 1)
+    edges = [MIN_SESSION_KM, *DISTANCE_EDGES]
+    low = edges[distance_band]
+    high = DISTANCE_EDGES[distance_band] if distance_band < len(DISTANCE_EDGES) else None
+    pace_edges = [None, *INTENSITY_EDGES, None]
+    return {"item": int(item), "km_min": float(low), "km_max": None if high is None else float(high),
+            "intensity": INTENSITY_LABELS[intensity_band],
+            "pace_ratio_min": pace_edges[intensity_band], "pace_ratio_max": pace_edges[intensity_band + 1]}
 
 
 def load_grid(path):
@@ -72,74 +104,74 @@ def find_races(meta, dates, distance, duration, km_range=(41.0, 47.0), minutes_r
                         "implausible_time": int((length_ok & ~found).sum()), "kept": int(found.sum())}
         for index in np.flatnonzero(found):
             rows.append({"race_id": f"{meta.athlete[index]}-{race.replace(' ', '_')}",
-                         "athlete": int(meta.athlete[index]), "race": race, "race_date": date,
-                         "race_day_index": day, "row": index,
-                         "finish_minutes": float(minutes[index]), "race_km": float(km[index]),
-                         "gender": meta.gender[index], "age_group": meta.age_group[index],
-                         "country": meta.country[index]})
+                         "athlete": int(meta.athlete[index]), "race": race,
+                         "race_date": pd.Timestamp(date), "finish_minutes": float(minutes[index]),
+                         "race_km": float(km[index])})
     return pd.DataFrame(rows), counts
 
 
-def history_windows(races, distance, duration, max_days=MAX_HISTORY_DAYS):
-    """Daily history strictly before race day. days_before=1 is the day before the race."""
-    parts = []
-    for race in races.itertuples():
-        available = min(max_days, race.race_day_index)
-        days_before = np.arange(1, available + 1)
-        columns = race.race_day_index - days_before
-        parts.append(pd.DataFrame({"race_id": race.race_id, "days_before": days_before,
-                                   "km": distance[race.row, columns], "minutes": duration[race.row, columns]}))
-    return pd.concat(parts, ignore_index=True)
+def build_sessions(meta, dates, distance, duration, athletes):
+    """Running days of the given athletes, with a causal pace reference and a session type."""
+    rows = np.flatnonzero(meta["athlete"].isin(athletes).to_numpy())
+    runner, day = np.nonzero(distance[rows] >= MIN_SESSION_KM)
+    sessions = pd.DataFrame({"athlete": meta["athlete"].to_numpy()[rows][runner], "date": dates[day],
+                             "km": distance[rows][runner, day], "minutes": duration[rows][runner, day]})
+    sessions = sessions.sort_values(["athlete", "date"], kind="stable").reset_index(drop=True)
+    sessions["pace"] = sessions["minutes"] / sessions["km"]
+    # closed="left" excludes the session itself: the reference uses strictly earlier days only.
+    reference = (sessions.set_index("date").groupby("athlete")["pace"]
+                 .rolling(f"{REFERENCE_DAYS}D", closed="left", min_periods=REFERENCE_MIN_RUNS).median())
+    sessions["reference_pace"] = reference.to_numpy()
+    sessions["reference_missing"] = sessions["reference_pace"].isna()
+    intensity = (sessions["pace"] / sessions["reference_pace"]).fillna(1.0)
+    sessions["intensity"] = intensity
+    sessions["item"] = item_id(sessions["km"].to_numpy(), intensity.to_numpy())
+    return sessions
 
 
-def weekly(days):
-    """Aggregate daily history into weeks. weeks_before=1 covers days_before 1..7."""
-    frame = days.assign(weeks_before=(days["days_before"] - 1) // 7 + 1, run=days["km"] >= 1)
-    complete = frame.groupby(["race_id", "weeks_before"])["days_before"].transform("size") == 7
-    frame = frame[complete]
-    grouped = frame.groupby(["race_id", "weeks_before"])
-    result = grouped.agg(km=("km", "sum"), minutes=("minutes", "sum"), runs=("run", "sum"),
-                         longest_km=("km", "max")).reset_index()
-    result["pace_min_per_km"] = np.where(result["km"] > 0, result["minutes"] / result["km"].where(result["km"] > 0), np.nan)
-    return result
+def add_race_calendar(sessions, races):
+    """Days until each session's next race. The race date is declared in advance; its result is not used."""
+    calendar = races[["athlete", "race_id", "race_date"]].sort_values("race_date")
+    calendar["race_date"] = calendar["race_date"].astype("datetime64[ns]")
+    sessions = sessions.assign(date=sessions["date"].astype("datetime64[ns]"))
+    merged = pd.merge_asof(sessions.sort_values("date"), calendar, left_on="date", right_on="race_date",
+                           by="athlete", direction="forward", allow_exact_matches=True)
+    merged = merged.sort_values(["athlete", "date"], kind="stable").reset_index(drop=True)
+    merged["days_to_race"] = (merged["race_date"] - merged["date"]).dt.days
+    merged["is_race"] = merged["days_to_race"] == 0
+    return merged.drop(columns=["race_date"])
 
 
-def assign_splits(athletes, seed=42, validation=0.15, test=0.15):
-    unique = np.array(sorted(set(athletes)))
-    order = np.random.default_rng(seed).permutation(len(unique))
-    n_test, n_validation = round(len(unique) * test), round(len(unique) * validation)
-    split = np.full(len(unique), "train", dtype=object)
-    split[order[:n_test]] = "test"
-    split[order[n_test:n_test + n_validation]] = "validation"
-    return dict(zip(unique.tolist(), split.tolist()))
+def assign_split(dates):
+    split = np.full(len(dates), "train", dtype=object)
+    split[dates >= pd.Timestamp(SPLIT_STARTS["validation"])] = "validation"
+    split[dates >= pd.Timestamp(SPLIT_STARTS["test"])] = "test"
+    return split
 
 
-def prepare(source, output, seed=42):
+def prepare(source, output):
     meta, dates, distance, duration = load_grid(source)
     distance, duration, zeroed = clean_days(distance, duration)
     races, counts = find_races(meta, dates, distance, duration)
     if races.empty:
         raise ValueError("No labelled races found")
-    days = history_windows(races, distance, duration)
-    weeks = weekly(days)
-    splits = assign_splits(races["athlete"], seed)
-    races["split"] = races["athlete"].map(splits)
-    races["history_days"] = np.minimum(MAX_HISTORY_DAYS, races["race_day_index"])
-    races = races.drop(columns=["row", "race_day_index"])
+    sessions = build_sessions(meta, dates, distance, duration, races["athlete"].unique())
+    sessions = add_race_calendar(sessions, races)
+    sessions["split"] = assign_split(sessions["date"])
     output.mkdir(parents=True, exist_ok=True)
     races.to_csv(output / "races.csv", index=False)
-    days.to_parquet(output / "days.parquet", index=False)
-    weeks.to_csv(output / "weeks.csv", index=False)
-    stats = {"source": str(source), "athletes_in_source": int(len(meta)), "days_in_source": int(len(dates)),
-             "implausible_days_zeroed": zeroed, "races": counts, "labelled_races": int(len(races)),
-             "labelled_athletes": int(races["athlete"].nunique()),
-             "split_races": races["split"].value_counts().to_dict(),
-             "split_athletes": races.drop_duplicates("athlete")["split"].value_counts().to_dict(),
-             "finish_minutes_quantiles": races["finish_minutes"].quantile([0, .05, .25, .5, .75, .95, 1]).round(1)
-                                                                .rename(lambda q: f"p{round(q * 100)}").to_dict(),
-             "history_days": {"max": MAX_HISTORY_DAYS, "races_with_16_weeks": int((races["history_days"] >= 112).sum())},
-             "label_definition": "race-day total duration in minutes for a 41-47 km day on the race date",
-             "split_policy": f"by athlete, seed {seed}, 70/15/15"}
+    sessions.to_parquet(output / "sessions.parquet", index=False)
+    targets = sessions[~sessions["is_race"]]
+    stats = {"source": str(source), "athletes_in_source": int(len(meta)), "implausible_days_zeroed": zeroed,
+             "races": counts, "labelled_races": int(len(races)), "users": int(sessions["athlete"].nunique()),
+             "sessions": int(len(sessions)), "race_day_sessions": int(sessions["is_race"].sum()),
+             "split_sessions": targets["split"].value_counts().to_dict(),
+             "split_users": targets.groupby("split")["athlete"].nunique().to_dict(),
+             "sessions_without_pace_reference": int(sessions["reference_missing"].sum()),
+             "items": NUM_ITEMS, "items_seen_in_train": int(targets.loc[targets.split == "train", "item"].nunique()),
+             "split_policy": f"global temporal cutoff: validation from {SPLIT_STARTS['validation']}, "
+                             f"test from {SPLIT_STARTS['test']}",
+             "item_definition": "distance band x pace relative to the runner's median pace over the 28 days strictly before"}
     (output / "stats.json").write_text(json.dumps(stats, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(stats, indent=2))
     return stats
@@ -149,9 +181,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=Path("data/raw/bmclab/run_ww_2019_d.parquet"))
     parser.add_argument("--output", type=Path, default=Path("data/processed/marathon"))
-    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
-    prepare(args.input, args.output, args.seed)
+    prepare(args.input, args.output)
 
 
 if __name__ == "__main__":

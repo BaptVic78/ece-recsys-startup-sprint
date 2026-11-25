@@ -28,4 +28,4 @@ See [the feedback-loop guide](FEEDBACK_README.md). Runners skip, complete and ra
 
 ## Marathon plan recommender (new direction)
 
-See [the marathon guide](MARATHON_README.md). The project is moving to marathon training plans learned from 16,121 real 2019 marathon preparations in the public BMClab dataset. This first step extracts the labelled races and their training history.
+See [the marathon guide](MARATHON_README.md). The project is moving to marathon training plans learned from 16,121 real 2019 marathon preparations in the public BMClab dataset. The model is a context-aware sequential Transformer (CARCA, RecSys 2022) trained on 2.2 million sessions of 15,518 marathon runners.
