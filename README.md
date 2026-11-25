@@ -25,3 +25,7 @@ See [the serving guide](SERVING_README.md). The API serves the trained GRU from 
 ## Feedback loop
 
 See [the feedback-loop guide](FEEDBACK_README.md). Runners skip, complete and rate recommendations (too easy / OK / too hard). This re-ranks their next list at once, feeds retraining with a promotion gate, and is evaluated with a simulator in [the simulation report](results/FEEDBACK_SIMULATION.md).
+
+## Marathon plan recommender (new direction)
+
+See [the marathon guide](MARATHON_README.md). The project is moving to marathon training plans learned from 16,121 real 2019 marathon preparations in the public BMClab dataset. This first step extracts the labelled races and their training history.
