@@ -116,7 +116,18 @@ def build_sessions(meta, dates, distance, duration, athletes):
     runner, day = np.nonzero(distance[rows] >= MIN_SESSION_KM)
     sessions = pd.DataFrame({"athlete": meta["athlete"].to_numpy()[rows][runner], "date": dates[day],
                              "km": distance[rows][runner, day], "minutes": duration[rows][runner, day]})
+    return annotate_sessions(sessions)
+
+
+def annotate_sessions(sessions):
+    """Add pace, the causal 28-day pace reference, intensity and session type.
+
+    Used both to build the training data and to process sessions logged through the API,
+    so served histories are encoded exactly as in training. Expects at most one session per
+    runner and day, with km of at least MIN_SESSION_KM.
+    """
     sessions = sessions.sort_values(["athlete", "date"], kind="stable").reset_index(drop=True)
+    sessions["date"] = pd.to_datetime(sessions["date"])
     sessions["pace"] = sessions["minutes"] / sessions["km"]
     # closed="left" excludes the session itself: the reference uses strictly earlier days only.
     reference = (sessions.set_index("date").groupby("athlete")["pace"]
