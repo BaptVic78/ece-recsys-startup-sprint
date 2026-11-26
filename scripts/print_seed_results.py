@@ -1,6 +1,6 @@
 """Print the results of every training seed, read straight from the JSON reports.
 
-Run from the repository root:  python print_seed_results.py
+Run from the repository root:  python scripts/print_seed_results.py
 Seed 42 is read from results/marathon/, the other seeds from results/marathon/seeds/seed_*/.
 """
 
