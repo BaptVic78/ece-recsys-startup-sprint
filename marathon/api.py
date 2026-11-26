@@ -5,6 +5,7 @@ Run with `python -m uvicorn marathon.api:app --host 0.0.0.0 --port 8000` and ope
 
 import os
 import time
+import zlib
 from datetime import date as Date
 from datetime import timedelta
 from pathlib import Path
@@ -15,7 +16,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from marathon.data import MIN_SESSION_KM, NUM_ITEMS, PACE_RANGE, describe_item, plausible_pace
-from marathon.serving import Recommender
+from marathon.serving import PLAN_STRATEGIES, Recommender
 from marathon.store import EFFORTS, INTERACTION_TYPES, InteractionError, Store
 
 MODEL_DIR = Path(os.environ.get("MARATHON_MODEL_DIR", "models/marathon"))
@@ -61,6 +62,11 @@ class PlanRequest(BaseModel):
     run_weekdays: list[int] = Field(default=[1, 3, 5, 6], min_length=1, max_length=7,
                                     description="0 = Monday ... 6 = Sunday")
     top_k: int = Field(default=3, ge=1, le=10, strict=True)
+    strategy: Literal[PLAN_STRATEGIES] = Field(
+        default="sample", description="sample: draw each day from the model's distribution (varied, realistic weeks); "
+                                      "greedy: always the top-ranked session")
+    seed: Optional[int] = Field(default=None, ge=0, description="defaults to a hash of user and start date, "
+                                                                "so the same request returns the same plan")
 
 
 class Interaction(BaseModel):
@@ -161,12 +167,16 @@ def create_app(model_dir=MODEL_DIR, db_path=DB_PATH, demo_dir=DEMO_DIR):
         if user["race_date"]:
             run_dates = [day for day in run_dates if str(day) < user["race_date"]]
         started = time.perf_counter()
-        days = recommender.plan(store.sessions(request.user_id, before=start), run_dates, user["race_date"], request.top_k)
+        seed = request.seed if request.seed is not None else zlib.crc32(f"{request.user_id}|{start}".encode())
+        days = recommender.plan(store.sessions(request.user_id, before=start), run_dates, user["race_date"],
+                                request.top_k, strategy=request.strategy, seed=seed)
         for day in days:
-            day["rec_id"] = store.save_recommendation(request.user_id, day["date"], recommender.name,
-                                                      [item["item"] for item in day["recommendations"]])
+            # The planned session may come from outside the top_k alternatives; store it too so it can be logged.
+            items = [item["item"] for item in day["recommendations"]]
+            items += [day["planned"]["item"]] if day["planned"]["item"] not in items else []
+            day["rec_id"] = store.save_recommendation(request.user_id, day["date"], recommender.name, items)
         return {"user_id": request.user_id, "start_date": str(start), "race_date": user["race_date"],
-                "goal_pace": goal_pace(user["goal_minutes"]), "days": days,
+                "goal_pace": goal_pace(user["goal_minutes"]), "strategy": request.strategy, "seed": seed, "days": days,
                 "latency_ms": round((time.perf_counter() - started) * 1000, 1)}
 
     @app.post("/log_interaction")

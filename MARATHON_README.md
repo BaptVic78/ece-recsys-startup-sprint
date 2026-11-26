@@ -86,3 +86,17 @@ Two self-attention layers encode the last 32 sessions. Every candidate type then
 - **Learning curves.** Training and validation losses decrease together, with no divergence. Validation NDCG@10 was still rising slowly at epoch 6, so more epochs might help both models.
 
 Reproduce with `python -m marathon.train`, `python -m marathon.train --no-race-context` and `python -m marathon.report`. Allow about 1 hour per model on an 8-core laptop when nothing else is running.
+
+## Weekly plans that vary like real training
+
+`POST /plan` rolls the model forward over the chosen run days: each planned session is treated as done before ranking the next day. The first version always took the top-ranked type (greedy decoding). Because that choice was fed back into the history, it was self-reinforcing, and weeks repeated one session at the same pace. Plans now **draw each day's session from the model's own distribution**, restricted to the types covering 90% of the probability (nucleus sampling, `marathon/serving.py`). The seed is a hash of the runner and the start date, so the same request returns the same plan.
+
+`python -m marathon.plan_eval` compares generated weeks with what 500 test runners actually ran, filling their real run dates from their real history ([results/marathon/PLAN_DIVERSITY.md](results/marathon/PLAN_DIVERSITY.md)):
+
+| Weeks | Distinct types / runs | Consecutive repeats | Weekly km | JS divergence of session types vs real |
+| --- | ---: | ---: | ---: | ---: |
+| Real | 0.92 | 0.07 | 47.4 | — |
+| Greedy (before) | 0.60 | 0.44 | 45.4 | 0.170 |
+| Sampled (now) | 0.93 | 0.06 | 46.6 | 0.013 |
+
+Greedy matched the real session type on 10.4% of days against 4.3% for sampling, because it always bets on the most likely type. Sampled weeks, however, have the variety, the long/short spread and the overall mix of real training weeks. The model's ranking quality is unchanged and is reported in MARATHON_RESULTS.md.

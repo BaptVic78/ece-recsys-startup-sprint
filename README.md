@@ -104,7 +104,7 @@ To use the app from another machine on the same Wi-Fi, run step 5 with `MARATHON
 | `POST /users` | Create a runner: race date, optional goal time, recent sessions |
 | `GET /users/{user_id}` | Profile, sessions and interaction log |
 | `POST /recommend` | Ranked session types for one day, from the trained model |
-| `POST /plan` | Next days on the chosen weekdays, rolled forward with the model |
+| `POST /plan` | Next days on the chosen weekdays, rolled forward with the model. Each day is drawn from the model's distribution (`strategy: "sample"`, the default, reproducible per runner and start date), or set `strategy: "greedy"` for the top session every day |
 | `POST /log_interaction` | `completed` (with km, minutes and optional effort), `skipped` or `missed`; written to SQLite |
 | `GET /demo/runners`, `POST /demo/{runner}/load` | Demo runners from the test period |
 

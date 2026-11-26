@@ -191,12 +191,14 @@ with week_tab:
         if plan["days"]:
             rows = []
             for day in plan["days"]:
-                session = day["recommendations"][0]
+                session = day["planned"]
                 rows.append({"Day": pd.Timestamp(day["date"]).strftime("%a %d %b"),
                              "Run": run_name(session), "Distance": f"{session['km']:g} km",
                              "Pace": session["pace"], "Time": duration_text(session["minutes"])})
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-            st.caption("The week assumes you complete each suggested run. Log what happens to update the next plan.")
+            st.caption("Each run is drawn from the model's own distribution over the sessions it ranks highest, "
+                       "so the week varies like a real training week. It assumes you complete each run; "
+                       "log what happens to update the next plan.")
         else:
             st.info("There are no training days in this period before your race.")
     else:

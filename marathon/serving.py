@@ -52,6 +52,29 @@ def prescription(item, reference_pace):
             "pace": f"{seconds // 60}:{seconds % 60:02d}/km", "minutes": minutes}
 
 
+PLAN_STRATEGIES = ("sample", "greedy")
+PLAN_TOP_P = 0.9
+
+
+def session_probabilities(scores, strategy):
+    """Model logits become a softmax; the cold-start fallback's counts become frequencies."""
+    scores = np.asarray(scores, dtype=float)
+    if strategy == "model":
+        weights = np.exp(scores - scores.max())
+    else:
+        weights = np.clip(scores, 0, None)
+    return weights / weights.sum()
+
+
+def nucleus_sample(probabilities, top_p, rng):
+    """Draw an index from the smallest highest-probability set whose mass reaches top_p."""
+    order = np.argsort(-probabilities, kind="stable")
+    cumulative = np.cumsum(probabilities[order])
+    keep = order[:int(np.searchsorted(cumulative, top_p) + 1)]
+    weights = probabilities[keep] / probabilities[keep].sum()
+    return int(rng.choice(keep, p=weights))
+
+
 def export_phase_popularity(sessions_path, model_dir):
     """Cold-start fallback: session-type counts per race-calendar bucket, from training sessions only."""
     sessions = pd.read_parquet(sessions_path, columns=["item", "days_to_race", "is_race", "split"])
@@ -136,21 +159,41 @@ class Recommender:
         return scores, {"strategy": strategy, "history_sessions": int(target), "reference_pace": float(reference),
                         "days_to_race": None if not np.isfinite(days_to_race) else int(days_to_race)}
 
+    def _day(self, scores, info, target_date, top_k):
+        order = np.argsort(-scores, kind="stable")
+        items = [{"rank": rank + 1, "score": float(scores[index]), **prescription(index + 1, info["reference_pace"])}
+                 for rank, index in enumerate(order[:top_k])]
+        return {"date": str(pd.Timestamp(target_date).date()), "phase": phase_name(info["days_to_race"]),
+                **info, "model": self.name, "recommendations": items}, order
+
     def recommend(self, sessions, target_date, race_date=None, top_k=10):
         scores, info = self.rank(sessions, target_date, race_date)
-        order = np.argsort(-scores, kind="stable")[:top_k]
-        items = [{"rank": rank + 1, "score": float(scores[index]), **prescription(index + 1, info["reference_pace"])}
-                 for rank, index in enumerate(order)]
-        return {"date": str(pd.Timestamp(target_date).date()), "phase": phase_name(info["days_to_race"]),
-                **info, "model": self.name, "recommendations": items}
+        return self._day(scores, info, target_date, top_k)[0]
 
-    def plan(self, sessions, run_dates, race_date=None, top_k=3):
-        """Roll the model forward: each planned day's top session is assumed done before the next day."""
+    def plan(self, sessions, run_dates, race_date=None, top_k=3, strategy="sample", seed=0, top_p=PLAN_TOP_P):
+        """Roll the model forward over the run dates; each planned session is assumed done before the next.
+
+        `strategy="sample"` (default) draws each day's session from the model's own distribution,
+        restricted to the smallest set of types covering `top_p` of the probability (nucleus
+        sampling), with a seeded generator so a plan is reproducible. This keeps the variety the
+        model learned from real weeks. `strategy="greedy"` always takes the top-ranked type; it
+        maximises per-day accuracy but feeds its own choice back and repeats one session.
+        """
+        if strategy not in PLAN_STRATEGIES:
+            raise ValueError(f"strategy must be one of {PLAN_STRATEGIES}")
+        rng = np.random.default_rng(seed)
         history = list(sessions)
         days = []
         for date in sorted(pd.Timestamp(d).normalize() for d in run_dates):
-            day = self.recommend(history, date, race_date, top_k)
+            scores, info = self.rank(history, date, race_date)
+            day, order = self._day(scores, info, date, top_k)
+            if strategy == "greedy":
+                chosen = int(order[0])
+            else:
+                chosen = nucleus_sample(session_probabilities(scores, info["strategy"]), top_p, rng)
+            rank = int(np.flatnonzero(order == chosen)[0]) + 1
+            day["planned"] = {"rank": rank, "score": float(scores[chosen]), **prescription(chosen + 1, info["reference_pace"])}
+            day["plan_strategy"] = strategy
             days.append(day)
-            best = day["recommendations"][0]
-            history.append({"date": date, "km": best["km"], "minutes": best["km"] * best["pace_min_per_km"]})
+            history.append({"date": date, "km": day["planned"]["km"], "minutes": day["planned"]["minutes"]})
         return days
