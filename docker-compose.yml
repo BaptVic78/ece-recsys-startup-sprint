@@ -1,0 +1,44 @@
+name: strideplan
+
+x-app: &app
+  image: ${STRIDEPLAN_IMAGE:-ghcr.io/baptvic78/ece-recsys-startup-sprint:latest}
+  build: .
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *app
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      MARATHON_MODEL_DIR: /app/models/marathon
+      MARATHON_DEMO_DIR: /app/demo
+      MARATHON_DB: /app/storage/interactions.sqlite3
+    volumes:
+      - interactions:/app/storage
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      start_period: 15s
+      retries: 12
+
+  frontend:
+    <<: *app
+    command: ["python", "-m", "streamlit", "run", "frontend/app.py", "--server.port", "8501", "--server.address", "0.0.0.0", "--server.headless", "true"]
+    environment:
+      MARATHON_API: http://api:8000
+    ports:
+      - "${FRONTEND_PORT:-8501}:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      start_period: 15s
+      retries: 12
+
+volumes:
+  interactions:
