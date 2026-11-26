@@ -69,6 +69,15 @@ class ServingTest(unittest.TestCase):
         self.assertEqual(cold["strategy"], "phase_popularity")
         self.assertEqual(cold["recommendations"][0]["item"], 8)
 
+    def test_implausible_sessions_never_reach_the_reference_or_the_model(self):
+        target = date(2019, 9, 1)
+        clean = self.recommender.recommend(history(), target, date(2019, 9, 29))
+        noisy = self.recommender.recommend(history() + [{"date": date(2019, 8, 30), "km": 1.0, "minutes": 900.0}],
+                                           target, date(2019, 9, 29))
+        self.assertEqual(clean["recommendations"], noisy["recommendations"])
+        self.assertLess(noisy["reference_pace"], 15)
+        self.assertTrue(all(item["minutes"] < 400 for item in noisy["recommendations"]))
+
     def test_plan_rolls_forward_and_prescription_is_concrete(self):
         days = self.recommender.plan(history(), [date(2019, 9, 3), date(2019, 9, 1)], date(2019, 9, 29))
         self.assertEqual([day["date"] for day in days], ["2019-09-01", "2019-09-03"])
@@ -131,9 +140,13 @@ class ApiTest(unittest.TestCase):
              "item": next(i for i in range(1, NUM_ITEMS + 1) if i not in [r["item"] for r in rec["recommendations"]])},
             {"user_id": "nobody", "type": "missed", "date": "2019-09-01"},
             {"user_id": "lea", "type": "liked", "date": "2019-09-01"},
+            {"user_id": "lea", "type": "completed", "date": "2019-09-01", "km": 1.0, "minutes": 900.0},
         ]
         codes = [self.client.post("/log_interaction", json=payload).status_code for payload in bad]
-        self.assertEqual(codes, [422, 422, 422, 422, 404, 422])
+        self.assertEqual(codes, [422, 422, 422, 422, 404, 422, 422])
+        implausible = {"user_id": "max", "sessions": [{"date": "2019-08-01", "km": 1.0, "minutes": 900.0}]}
+        self.assertEqual(self.client.post("/users", json=implausible).status_code, 422)
+        self.assertEqual(self.client.get("/users/max").status_code, 404)
         self.assertEqual(self.client.get("/users/lea").json()["interactions"], [])
 
     def test_demo_runner_loads_only_the_past(self):
@@ -144,6 +157,18 @@ class ApiTest(unittest.TestCase):
         user = self.client.get("/users/demo-1").json()
         self.assertTrue(all(s["date"] < "2019-09-01" for s in user["sessions"]))
         self.assertEqual(self.client.get("/health").json()["status"], "ok")
+
+    def test_loading_a_demo_again_restarts_it(self):
+        loaded = self.client.post("/demo/1/load").json()
+        rec = self.client.post("/recommend", json={"user_id": "demo-1", "date": loaded["today"], "top_k": 3}).json()
+        self.client.post("/log_interaction", json={"user_id": "demo-1", "type": "completed", "date": loaded["today"],
+                                                   "rec_id": rec["rec_id"], "km": 8.0, "minutes": 45.0})
+        reloaded = self.client.post("/demo/1/load").json()
+        user = self.client.get("/users/demo-1").json()
+        self.assertEqual(reloaded["today"], loaded["today"])
+        self.assertTrue(all(s["date"] < loaded["today"] for s in user["sessions"]))
+        self.assertEqual(user["interactions"], [])
+        self.assertLessEqual(user["next_day"], loaded["today"])
 
 
 if __name__ == "__main__":

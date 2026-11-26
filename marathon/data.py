@@ -37,6 +37,11 @@ INTENSITY_LABELS = ["much faster", "faster", "slightly faster", "usual", "slight
 REFERENCE_DAYS = 28
 REFERENCE_MIN_RUNS = 3
 NUM_ITEMS = (len(DISTANCE_EDGES) + 1) * (len(INTENSITY_EDGES) + 1)
+# Representative distance (km) and pace ratio of each band, used to turn a session type into a
+# concrete session and to compute expected distances in the report.
+DISTANCE_POINTS = [3.0, 6.5, 9.0, 11.0, 13.5, 16.5, 19.5, 23.0, 27.5, 32.0, 37.0]
+INTENSITY_POINTS = [0.87, 0.925, 0.97, 1.01, 1.055, 1.11]
+assert len(DISTANCE_POINTS) == len(DISTANCE_EDGES) + 1 and len(INTENSITY_POINTS) == len(INTENSITY_EDGES) + 1
 
 
 def item_id(km, intensity):
@@ -69,10 +74,27 @@ def load_grid(path):
         raise ValueError("Expected exactly one row per athlete per day")
     if not (frame["datetime"].to_numpy().reshape(len(athletes), -1) == dates).all():
         raise ValueError("Every athlete must cover the same sorted calendar")
+    # Array positions are used as calendar days, so a date missing for everyone must fail too.
+    steps = np.diff(dates.astype("datetime64[D]")).astype(int)
+    if len(dates) and not (steps == 1).all():
+        raise ValueError("The calendar must contain consecutive days without gaps")
     distance = frame["distance"].to_numpy(np.float64).reshape(len(athletes), -1)
     duration = frame["duration"].to_numpy(np.float64).reshape(len(athletes), -1)
     meta = frame.iloc[::len(dates)][["athlete", "gender", "age_group", "country", "major"]].reset_index(drop=True)
     return meta, pd.DatetimeIndex(dates), distance, duration
+
+
+def plausible_pace(km, minutes):
+    """True where km and minutes are finite, positive and their pace lies in PACE_RANGE.
+
+    The single quality rule for a running day, shared by the training pipeline and the API.
+    """
+    km = np.asarray(km, dtype=float)
+    minutes = np.asarray(minutes, dtype=float)
+    valid = np.isfinite(km) & np.isfinite(minutes) & (km > 0) & (minutes > 0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        pace = np.where(valid, minutes / np.where(valid, km, 1), np.nan)
+    return valid & (pace >= PACE_RANGE[0]) & (pace <= PACE_RANGE[1])
 
 
 def clean_days(distance, duration):
@@ -80,9 +102,7 @@ def clean_days(distance, duration):
     distance, duration = distance.copy(), duration.copy()
     bad = ~np.isfinite(distance) | ~np.isfinite(duration) | (distance < 0) | (duration < 0)
     moving = (distance > 0) & ~bad
-    with np.errstate(divide="ignore", invalid="ignore"):
-        pace = np.where(moving, duration / np.where(moving, distance, 1), np.nan)
-    bad |= moving & ~((pace >= PACE_RANGE[0]) & (pace <= PACE_RANGE[1]))
+    bad |= moving & ~plausible_pace(distance, duration)
     bad |= (distance == 0) & (duration > 0)
     distance[bad] = 0
     duration[bad] = 0
@@ -122,9 +142,9 @@ def build_sessions(meta, dates, distance, duration, athletes):
 def annotate_sessions(sessions):
     """Add pace, the causal 28-day pace reference, intensity and session type.
 
-    Used both to build the training data and to process sessions logged through the API,
-    so served histories are encoded exactly as in training. Expects at most one session per
-    runner and day, with km of at least MIN_SESSION_KM.
+    Used to build the training data, to re-check the export in validate.py and to encode
+    histories in the API, so all three agree. Expects at most one session per runner and day,
+    each with at least MIN_SESSION_KM and a plausible pace.
     """
     sessions = sessions.sort_values(["athlete", "date"], kind="stable").reset_index(drop=True)
     sessions["date"] = pd.to_datetime(sessions["date"])

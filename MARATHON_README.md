@@ -82,7 +82,7 @@ Two self-attention layers encode the last 32 sessions. Every candidate type then
 - **Sanity floor.** The model beats random and most-popular by a wide margin. It also beats personal popularity, the strongest baseline: NDCG@10 is +0.067, 95% interval [+0.066, +0.068].
 - **Not just popularity.** All 66 types appear in some top-10 list, against 15% of types for most-popular.
 - **Innovation.** The race context matters where it should. In the taper (race within 3 weeks), NDCG@10 rises from 0.267 to 0.304, +0.037 with 95% interval [+0.035, +0.039], and Recall@20 gains +0.060. It is neutral in peak and recovery weeks. It costs 0.009 NDCG@10 when no race is planned, so the overall NDCG@10 is unchanged; overall Recall@20 gains +0.005.
-- **Taper check.** With the same histories and only the race date moved, the expected recommended distance peaks at 14.8 km three weeks out, then falls to 7.9 km two days before the race. The ablation stays flat at 13.7 km. No rule encodes the taper: the model learned it from data.
+- **Taper check.** We take 2,000 distinct test runners, one session each, keep their histories and move only the race date. The expected recommended distance peaks at 14.9 km three weeks out, then falls to 7.7 km two days before the race. The ablation stays flat at 13.6 km. No rule encodes the taper: the model learned it from data.
 - **Learning curves.** Training and validation losses decrease together, with no divergence. Validation NDCG@10 was still rising slowly at epoch 6, so more epochs might help both models.
 
 Reproduce with `python -m marathon.train`, `python -m marathon.train --no-race-context` and `python -m marathon.report`. Allow about 1 hour per model on an 8-core laptop when nothing else is running.

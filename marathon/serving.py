@@ -13,15 +13,12 @@ import numpy as np
 import pandas as pd
 import torch
 
-from marathon.data import DISTANCE_EDGES, INTENSITY_EDGES, MIN_SESSION_KM, NUM_ITEMS, annotate_sessions, describe_item
+from marathon.data import (DISTANCE_POINTS, INTENSITY_EDGES, INTENSITY_POINTS, MIN_SESSION_KM, NUM_ITEMS,
+                           annotate_sessions, describe_item, plausible_pace)
 from marathon.model import ContextCrossAttentionRecommender
 from marathon.sequences import MIN_HISTORY, RACE_BUCKETS, SessionStore, item_attributes, race_bucket
 
-# Representative values used to turn a session type into a concrete prescription.
-DISTANCE_POINTS = [3.0, 6.5, 9.0, 11.0, 13.5, 16.5, 19.5, 23.0, 27.5, 32.0, 37.0]
-INTENSITY_POINTS = [0.87, 0.925, 0.97, 1.01, 1.055, 1.11]
 DEFAULT_PACE = 6.0
-assert len(DISTANCE_POINTS) == len(DISTANCE_EDGES) + 1 and len(INTENSITY_POINTS) == len(INTENSITY_EDGES) + 1
 
 
 def phase_name(days_to_race):
@@ -101,7 +98,9 @@ class Recommender:
         target_date = pd.Timestamp(target_date).normalize()
         rows = [{"athlete": "runner", "date": pd.Timestamp(s["date"]).normalize(), "km": float(s["km"]),
                  "minutes": float(s["minutes"])} for s in sessions]
-        rows = [row for row in rows if row["date"] < target_date and row["km"] >= MIN_SESSION_KM and row["minutes"] > 0]
+        # Same quality rule as training: implausible paces never reach the pace reference or the model.
+        rows = [row for row in rows if row["date"] < target_date and row["km"] >= MIN_SESSION_KM
+                and plausible_pace(row["km"], row["minutes"])]
         rows.append({"athlete": "runner", "date": target_date, "km": 10.0, "minutes": 60.0})
         frame = annotate_sessions(pd.DataFrame(rows))
         race = pd.Timestamp(race_date).normalize() if race_date else None

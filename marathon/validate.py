@@ -4,9 +4,11 @@ import argparse
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
-from marathon.data import NUM_ITEMS, RACES, SPLIT_STARTS, assign_split
+from marathon.data import (MIN_SESSION_KM, NUM_ITEMS, RACES, SPLIT_STARTS, add_race_calendar, annotate_sessions,
+                           assign_split, plausible_pace)
 
 
 def validate(directory):
@@ -36,6 +38,20 @@ def validate(directory):
         errors.append("race-day sessions do not match the race table")
     if len(sessions) != stats["sessions"] or len(races) != stats["labelled_races"]:
         errors.append("stats.json counts do not match the exports")
+    if not plausible_pace(sessions["km"], sessions["minutes"]).all() or (sessions["km"] < MIN_SESSION_KM).any():
+        errors.append("a session breaks the distance or pace quality rule")
+    # Recompute every derived column from the raw km and minutes, so a missing, extra or edited
+    # session shows up as a mismatch in the causal pace reference, session type or race calendar.
+    expected = add_race_calendar(annotate_sessions(sessions[["athlete", "date", "km", "minutes"]].copy()), races)
+    actual = sessions.sort_values(["athlete", "date"], kind="stable").reset_index(drop=True)
+    for column in ("reference_pace", "intensity", "days_to_race"):
+        if not np.allclose(actual[column], expected[column], equal_nan=True):
+            errors.append(f"{column} does not match its recomputation from km, minutes and dates")
+    for column in ("item", "is_race", "reference_missing"):
+        if not (actual[column].to_numpy() == expected[column].to_numpy()).all():
+            errors.append(f"{column} does not match its recomputation from km, minutes and dates")
+    if not actual["race_id"].fillna("").equals(expected["race_id"].fillna("")):
+        errors.append("race_id does not match the race calendar")
     if errors:
         raise ValueError("; ".join(errors))
     summary = {"verified_sessions": len(sessions), "verified_users": int(sessions["athlete"].nunique()),

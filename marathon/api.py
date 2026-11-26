@@ -12,9 +12,9 @@ from typing import Literal, Optional
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from marathon.data import NUM_ITEMS, describe_item
+from marathon.data import MIN_SESSION_KM, NUM_ITEMS, PACE_RANGE, describe_item, plausible_pace
 from marathon.serving import Recommender
 from marathon.store import EFFORTS, INTERACTION_TYPES, InteractionError, Store
 
@@ -28,6 +28,11 @@ class Session(BaseModel):
     date: Date
     km: float = Field(gt=0, le=100, allow_inf_nan=False)
     minutes: float = Field(gt=0, le=900, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def check_quality(self):
+        check_session(self.km, self.minutes)
+        return self
 
 
 class UserRequest(BaseModel):
@@ -65,6 +70,20 @@ class Interaction(BaseModel):
     km: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
     minutes: Optional[float] = Field(default=None, gt=0, le=900, allow_inf_nan=False)
     effort: Optional[Literal[EFFORTS]] = None
+
+    @model_validator(mode="after")
+    def check_quality(self):
+        if self.km is not None and self.minutes is not None:
+            check_session(self.km, self.minutes)
+        return self
+
+
+def check_session(km, minutes):
+    """The training pipeline's quality rule, enforced at the API boundary."""
+    if km < MIN_SESSION_KM:
+        raise ValueError(f"a session must be at least {MIN_SESSION_KM:g} km")
+    if not plausible_pace(km, minutes):
+        raise ValueError(f"pace must be between {PACE_RANGE[0]:g} and {PACE_RANGE[1]:g} min/km")
 
 
 def goal_pace(goal_minutes):
@@ -173,6 +192,9 @@ def create_app(model_dir=MODEL_DIR, db_path=DB_PATH, demo_dir=DEMO_DIR):
         sessions = pd.read_csv(demo_dir / "sessions.csv")
         history = sessions[(sessions["runner"] == runner) & (sessions["date"] < info["today"])]
         user_id = f"demo-{runner}"
+        # Loading a demo runner always restarts it from its demo date: earlier logged state is
+        # removed so the stored history matches the returned `today`.
+        store.reset_user(user_id)
         store.upsert_user(user_id, info["race_date"], None)
         store.add_sessions(user_id, history.to_dict(orient="records"), "bmclab")
         return {"user_id": user_id, "today": info["today"], "race_date": info["race_date"],
