@@ -150,13 +150,29 @@ The image workflow also builds and tests the container on PRs. On `main`, it
 publishes the tested image to `ghcr.io/baptvic78/ece-recsys-startup-sprint`,
 with `latest` and commit tags.
 
-After the first publication, a package owner must set the GHCR package visibility
-to **Public** and check that it can be pulled without a login.
+The GHCR package is public: an anonymous pull works, with no login.
 For the CI failure check, temporarily add a failing test on the PR, record the red
 run, remove the test and record the green run. Keep no failing test on `main`.
 
-For Week 3 Q6, a teammate who did not write the setup must time clone-to-first-
-recommendation on a clean machine and attach the timing and a screenshot to the PR.
+### Clean-machine check (Week 3 Q6)
+
+Every team member wrote part of the code, so nobody could time the README on a machine where the
+project had never been opened. Two runs replace that check. Both start from an empty directory,
+follow the quick start word for word (`git clone`, `docker compose up -d --wait`) and then run
+`scripts/check_docker.py`:
+
+| Machine | Clone to app ready | Image | End-to-end check |
+| --- | ---: | --- | --- |
+| Fresh GitHub `ubuntu-latest` VM, no login, no local images ([workflow](.github/workflows/clean-machine.yml), [run](https://github.com/BaptVic78/ece-recsys-startup-sprint/actions/runs/45898327838)) | 42 s | pulled from GHCR | passed (recommendation in 0.013 s) |
+| Team laptop (Windows, Docker Desktop), fresh clone, no StridePlan image or volume beforehand, ports 8010/8502 via `.env` | 147 s | pulled from GHCR | passed (recommendation in 0.061 s) |
+
+The end-to-end check covers:
+- a recommendation from the trained model;
+- `completed`, `skipped` and `missed` saved through `/log_interaction`;
+- the saved data unchanged after `docker compose restart`;
+- a generated plan.
+
+The workflow runs on every PR and push to `main`, and fails above 300 s.
 Local checks are recorded in [docs/DOCKER_CHECKS.md](docs/DOCKER_CHECKS.md).
 
 ## Repository
