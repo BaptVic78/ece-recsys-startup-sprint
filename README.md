@@ -131,18 +131,28 @@ To use the app from another machine on the same Wi-Fi, run step 5 with `MARATHON
 
 Runners with fewer than 5 logged sessions get the training popularity of their preparation phase (`strategy: "phase_popularity"`), because the model was trained with at least 5 sessions of history. Everyone else gets the model (`strategy: "model"`).
 
-## Retrain the model (optional, about 2 hours on a laptop CPU)
+## Retrain the model (optional, about 2 hours per model on a laptop CPU)
+
+Running the app needs none of this: the trained models are committed. To rebuild everything from the public data:
 
 ```text
-python -m marathon.download          # 155 MB, checked against the published MD5
-python -m marathon.data              # sessions, session types, race calendar, temporal split
-python -m marathon.validate          # leakage and consistency checks
-python -m marathon.train             # full model, saved to models/marathon/full.pt
-python -m marathon.train --no-race-context   # ablation
-python -m marathon.serving           # cold-start fallback from training data only
-python -m marathon.report            # results/marathon/MARATHON_RESULTS.md and learning curves
-python -m marathon.demo              # demo sample
+python -m pip install -r requirements-results.txt   # adds matplotlib for the report figures
+python -m marathon.download          # 155 MB BMClab 2019 file, checked against the published MD5
+python -m marathon.data              # sessions, 66 session types, race calendar, temporal split
+python -m marathon.validate          # leakage and consistency checks on the export
+python -m marathon.train             # context-aware recommender -> models/marathon/full.pt
+python -m marathon.train --no-race-context   # ablation -> models/marathon/no_race_context.pt
+python -m marathon.serving           # cold-start fallback, from training data only
+python -m marathon.forecast          # finish-time forecast -> models/marathon/forecast.json
+python -m marathon.report            # results/marathon/MARATHON_RESULTS.md, curves, bootstrap, taper check
+python -m marathon.seeds train       # optional: seeds 7 and 123 (about 4 more hours), then
+python -m marathon.seeds report      # results/marathon/SEEDS.md
+python -m marathon.plan_eval         # weekly-plan realism -> results/marathon/PLAN_DIVERSITY.md
+python -m marathon.demo              # demo sample of real test-period runners (demo/)
+python -m marathon.mock_profiles     # the five synthetic histories of the sign-up demo
 ```
+
+The method, data and leakage policy are described in [MARATHON_README.md](MARATHON_README.md).
 
 ## Tests
 
@@ -200,12 +210,21 @@ Local checks are recorded in [docs/DOCKER_CHECKS.md](docs/DOCKER_CHECKS.md).
 
 | Path | Content |
 | --- | --- |
-| `marathon/` | Data pipeline, model, training, evaluation, serving, API |
-| `frontend/app.py` | Streamlit frontend |
-| `models/marathon/` | Trained checkpoints and their configurations |
-| `demo/` | Demo sample of 12 test-period runners (BMClab, CC BY 4.0) |
-| `results/marathon/` | Offline results, learning curves, ablation |
-| `tests/` | Unit and end-to-end tests |
-| `strideplan/`, `strideplan_pipeline/` | Earlier Endomondo prototype (Weeks 1–3), kept for reference: [first results](results/FIRST_RESULTS.md), [serving](SERVING_README.md), [feedback loop](FEEDBACK_README.md) |
+| `marathon/data.py`, `download.py`, `validate.py` | BMClab download, session catalogue (66 types), race calendar, temporal split and leakage checks |
+| `marathon/sequences.py` | Turns histories into model inputs (sessions, context buckets, target-day context) |
+| `marathon/model.py` | The CARCA-style context-aware recommender (self-attention over history, cross-attention scoring) |
+| `marathon/train.py`, `evaluate.py`, `report.py`, `seeds.py` | Training loop, NDCG@10 / Recall@20 against baselines, ablation, bootstrap, phase metrics, seeds |
+| `marathon/serving.py`, `explain.py` | Predict functions: daily ranking, sampled weekly plans, cold-start fallback, "because of" explanations |
+| `marathon/forecast.py` | Marathon finish-time forecast learned on the spring 2019 majors, tested on the autumn majors |
+| `marathon/api.py`, `store.py` | FastAPI backend and the SQLite store behind `/log_interaction` |
+| `marathon/plan_eval.py`, `demo.py`, `mock_profiles.py` | Weekly-plan evaluation, demo sample of real runners, synthetic sign-up histories |
+| `frontend/app.py`, `frontend/pages/1_Staff.py`, `frontend/ui.py` | Streamlit web app: landing, sign-up and import, dashboard, staff page |
+| `models/marathon/` | Trained checkpoints, configurations, forecast and fallback |
+| `demo/` | 12 real test-period runners (BMClab, CC BY 4.0) and the 5 synthetic sign-up histories |
+| `results/marathon/` | Offline results: metrics, learning curves, ablation, seeds, plan realism |
+| `tests/` | Unit and end-to-end tests (data, model, API, frontend, forecast, explanations) |
+| `scripts/` | Docker end-to-end check and a seed-results printer |
+| `Dockerfile`, `docker-compose.yml`, `.github/workflows/` | One-command run, CI tests, image publishing, clean-machine timing |
+| `strideplan/`, `strideplan_pipeline/` | Weeks 1–3 prototype on Endomondo data, kept for reference ([docs](docs/legacy/), [results](results/legacy/)) |
 
 Data: Afonseca, Watanabe & Duarte (2022), *A public dataset on long-distance running training in 2019 and 2020*, figshare, CC BY 4.0, [PeerJ 10:e13192](https://peerj.com/articles/13192).

@@ -83,7 +83,7 @@ Three arms share the same runners, budgets and random draws:
 - **Short loop**: re-ranking, logged history and exploration;
 - **Short + retraining**: the short loop, plus retraining before rounds 3, 5 and 7, each through the promotion gate.
 
-There are two scenarios: stable habits, and runners who now want runs one spread lighter than usual. See [the simulation report](results/FEEDBACK_SIMULATION.md).
+There are two scenarios: stable habits, and runners who now want runs one spread lighter than usual. See [the simulation report](../../results/legacy/FEEDBACK_SIMULATION.md).
 
 ### Results (300 runners, 8 rounds, 3 seeds, model `gru-498e31cda864`)
 
