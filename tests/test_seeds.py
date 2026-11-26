@@ -22,14 +22,30 @@ def shifted(report, name, delta):
     return report
 
 
+PHASES = {seeds.TAPER: (0.3040, 0.2670), "peak (4-10 weeks out)": (0.2731, 0.2741), seeds.NO_RACE: (0.3429, 0.3523)}
+
+
+def fake_report(name, ndcg, recall):
+    """The parts of a `marathon.train` report that marathon.seeds reads, with the seed-42 values."""
+    column = 0 if name == "full" else 1
+    report = {"model": name, "best_epoch": 6,
+              "test": {name: {"ndcg@10": ndcg, "recall@20": recall}},
+              "phases": {name: {phase: {"ndcg@10": values[column], "recall@20": 0.79 + 0.06 * (column == 0)}
+                                for phase, values in PHASES.items()}}}
+    if name == "full":
+        report["test"]["personal_popular"] = {"ndcg@10": 0.2555, "recall@20": 0.6636}
+    return report
+
+
 class SeedsTest(unittest.TestCase):
     def setUp(self):
+        # Built here rather than read from results/, which is not part of the Docker image.
         self.directory = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.directory)
-        for name in seeds.MODELS:
-            shutil.copy(RESULTS / f"{name}.json", self.directory / f"{name}.json")
-        self.full = json.loads((RESULTS / "full.json").read_text(encoding="utf-8"))
-        self.ablation = json.loads((RESULTS / "no_race_context.json").read_text(encoding="utf-8"))
+        self.full, self.ablation = fake_report("full", 0.3225, 0.7953), fake_report("no_race_context", 0.3231, 0.7904)
+        for seed in (42,):
+            self.write(seed, "full", self.full)
+            self.write(seed, "no_race_context", self.ablation)
 
     def write(self, seed, name, report):
         path = seeds.report_path(self.directory, seed, name)
@@ -56,9 +72,16 @@ class SeedsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             seeds.train_command(42, "full", settings, Path("d"), Path("c"), RESULTS, 4)
 
-    def test_seed_42_alone_reproduces_the_published_numbers(self):
+    def test_seed_metrics_compute_the_published_differences(self):
         row = seeds.seed_metrics(self.full, self.ablation)
         self.assertAlmostEqual(row["ours ndcg@10"], 0.3225, places=4)
+        self.assertAlmostEqual(row["ours - personal popularity, ndcg@10"], 0.0670, places=4)
+        self.assertAlmostEqual(row[f"race-context gain ndcg@10, {seeds.TAPER}"], 0.0370, places=4)
+
+    @unittest.skipUnless((RESULTS / "full.json").exists(), "results/ is not in the Docker image")
+    def test_committed_seed_42_reports_give_the_published_numbers(self):
+        full, ablation = (json.loads((RESULTS / f"{name}.json").read_text(encoding="utf-8")) for name in seeds.MODELS)
+        row = seeds.seed_metrics(full, ablation)
         self.assertAlmostEqual(row["ours - personal popularity, ndcg@10"], 0.0670, places=4)
         self.assertAlmostEqual(row[f"race-context gain ndcg@10, {seeds.TAPER}"], 0.0370, places=4)
 
