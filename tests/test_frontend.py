@@ -111,6 +111,19 @@ class FrontendTest(unittest.TestCase):
         self.assertEqual(list(week.columns), ["Day", "Session", "Pace", "Time", "Model rank", "Top-ranked options"])
         self.assertTrue(all(cell.startswith("#") for cell in week["Model rank"]))
 
+    def test_today_card_says_which_past_runs_drove_the_session(self):
+        loaded = self.client.post("/demo/4302/load").json()
+        today = date.fromisoformat(loaded["today"])
+        planned = self.client.post("/recommend", json={"user_id": loaded["user_id"], "date": str(today),
+                                                       "top_k": 3}).json()["planned"]
+        app = self.page(loaded["user_id"], today)
+        self.assertFalse(app.exception, app.exception)
+        lines = [element.value for element in app.markdown if element.value.startswith("Because of: ")]
+        self.assertEqual(len(lines), 1)
+        expected = ", ".join(f"{date.fromisoformat(run['date']):%a %d %b} {run['km']:g} km"
+                             for run in planned["because_of"])
+        self.assertEqual(lines[0], "Because of: " + expected)
+
     def test_skip_logs_the_session_shown_and_moves_to_next_day(self):
         loaded = self.client.post("/demo/4302/load").json()
         today = date.fromisoformat(loaded["today"])

@@ -77,6 +77,14 @@ def other_options(day, count=2):
     return [item for item in day["recommendations"] if item["item"] != day["planned"]["item"]][:count]
 
 
+def because_text(item):
+    """One line naming the past runs the model attended to most for this session, or None."""
+    runs = item.get("because_of") or []
+    if not runs:
+        return None
+    return "Because of: " + ", ".join(f"{date.fromisoformat(run['date']):%a %d %b} {run['km']:g} km" for run in runs)
+
+
 def pace_text(minutes_per_km):
     seconds = round(minutes_per_km * 60)
     return f"{seconds // 60}:{seconds % 60:02d}/km"
@@ -171,6 +179,10 @@ with today_tab:
         distance.metric("Distance", f"{session['km']:g} km")
         pace.metric("Pace", session["pace"])
         duration.metric("Time", duration_text(session["minutes"]))
+        because = because_text(session)
+        if because:
+            st.markdown(because, help="The past runs the model paid most attention to when it scored this session "
+                                      "(cross-attention weights). They show what it looked at, not a training rule.")
         if recommendation["strategy"] == "phase_popularity":
             st.caption("Based on common runs at this stage. Add at least five recent runs for a personalised ranking.")
         else:
