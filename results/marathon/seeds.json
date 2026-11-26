@@ -1,0 +1,219 @@
+{
+  "per_seed": {
+    "42": {
+      "best_epoch_full": 6,
+      "best_epoch_ablation": 6,
+      "ours ndcg@10": 0.3225183440877519,
+      "ablation ndcg@10": 0.32306182017771307,
+      "ours - personal popularity, ndcg@10": 0.06701775563336287,
+      "ours - ablation, ndcg@10": -0.0005434760899611923,
+      "ours recall@20": 0.7953466558694857,
+      "ablation recall@20": 0.7904121042273697,
+      "ours - personal popularity, recall@20": 0.13179469919820863,
+      "ours - ablation, recall@20": 0.004934551642115981,
+      "ours ndcg@10, taper (race in 0-3 weeks)": 0.3040148021654043,
+      "ablation ndcg@10, taper (race in 0-3 weeks)": 0.2670452719457175,
+      "race-context gain ndcg@10, taper (race in 0-3 weeks)": 0.0369695302196868,
+      "ours ndcg@10, peak (4-10 weeks out)": 0.2730862738049089,
+      "ablation ndcg@10, peak (4-10 weeks out)": 0.2740759859683785,
+      "race-context gain ndcg@10, peak (4-10 weeks out)": -0.0009897121634696027,
+      "ours ndcg@10, post-race recovery (0-8 weeks after)": 0.3380061796011422,
+      "ablation ndcg@10, post-race recovery (0-8 weeks after)": 0.3385872566288931,
+      "race-context gain ndcg@10, post-race recovery (0-8 weeks after)": -0.0005810770277508981,
+      "ours ndcg@10, no race context": 0.3428505470098744,
+      "ablation ndcg@10, no race context": 0.35228824107017037,
+      "race-context gain ndcg@10, no race context": -0.009437694060295987,
+      "taper gain recall@20": 0.06002918975172811
+    },
+    "7": {
+      "best_epoch_full": 6,
+      "best_epoch_ablation": 6,
+      "ours ndcg@10": 0.32043081874728135,
+      "ablation ndcg@10": 0.3235873057283047,
+      "ours - personal popularity, ndcg@10": 0.06493023029289235,
+      "ours - ablation, ndcg@10": -0.003156486981023332,
+      "ours recall@20": 0.7941423313103424,
+      "ablation recall@20": 0.7901880530271158,
+      "ours - personal popularity, recall@20": 0.1305903746390653,
+      "ours - ablation, recall@20": 0.003954278283226587,
+      "ours ndcg@10, taper (race in 0-3 weeks)": 0.30368158777321047,
+      "ablation ndcg@10, taper (race in 0-3 weeks)": 0.27330009733472677,
+      "race-context gain ndcg@10, taper (race in 0-3 weeks)": 0.030381490438483705,
+      "ours ndcg@10, peak (4-10 weeks out)": 0.2708688001328439,
+      "ablation ndcg@10, peak (4-10 weeks out)": 0.2731860172589361,
+      "race-context gain ndcg@10, peak (4-10 weeks out)": -0.002317217126092175,
+      "ours ndcg@10, post-race recovery (0-8 weeks after)": 0.3325091383639043,
+      "ablation ndcg@10, post-race recovery (0-8 weeks after)": 0.33951429108571,
+      "race-context gain ndcg@10, post-race recovery (0-8 weeks after)": -0.007005152721805741,
+      "ours ndcg@10, no race context": 0.33991992501825924,
+      "ablation ndcg@10, no race context": 0.3509499790533126,
+      "race-context gain ndcg@10, no race context": -0.01103005403505336,
+      "taper gain recall@20": 0.0529606870419812
+    },
+    "123": {
+      "best_epoch_full": 6,
+      "best_epoch_ablation": 6,
+      "ours ndcg@10": 0.3205903192978903,
+      "ablation ndcg@10": 0.31955337432942865,
+      "ours - personal popularity, ndcg@10": 0.06508973084350128,
+      "ours - ablation, ndcg@10": 0.0010369449684616283,
+      "ours recall@20": 0.7923351510191573,
+      "ablation recall@20": 0.7873539509052273,
+      "ours - personal popularity, recall@20": 0.12878319434788021,
+      "ours - ablation, recall@20": 0.0049812001139299955,
+      "ours ndcg@10, taper (race in 0-3 weeks)": 0.3029232252358072,
+      "ablation ndcg@10, taper (race in 0-3 weeks)": 0.2714449695641093,
+      "race-context gain ndcg@10, taper (race in 0-3 weeks)": 0.03147825567169793,
+      "ours ndcg@10, peak (4-10 weeks out)": 0.26966012088020364,
+      "ablation ndcg@10, peak (4-10 weeks out)": 0.2709983949430321,
+      "race-context gain ndcg@10, peak (4-10 weeks out)": -0.0013382740628284373,
+      "ours ndcg@10, post-race recovery (0-8 weeks after)": 0.3361357152437121,
+      "ablation ndcg@10, post-race recovery (0-8 weeks after)": 0.3332250868495469,
+      "race-context gain ndcg@10, post-race recovery (0-8 weeks after)": 0.0029106283941652267,
+      "ours ndcg@10, no race context": 0.34058957181863164,
+      "ablation ndcg@10, no race context": 0.3453376309025101,
+      "race-context gain ndcg@10, no race context": -0.004748059083878431,
+      "taper gain recall@20": 0.04983428037020554
+    }
+  },
+  "summary": {
+    "best_epoch_full": {
+      "mean": 6.0,
+      "std": 0.0,
+      "min": 6,
+      "max": 6
+    },
+    "best_epoch_ablation": {
+      "mean": 6.0,
+      "std": 0.0,
+      "min": 6,
+      "max": 6
+    },
+    "ours ndcg@10": {
+      "mean": 0.32117982737764117,
+      "std": 0.0011619295778339258,
+      "min": 0.32043081874728135,
+      "max": 0.3225183440877519
+    },
+    "ablation ndcg@10": {
+      "mean": 0.3220675000784821,
+      "std": 0.002193092560178536,
+      "min": 0.31955337432942865,
+      "max": 0.3235873057283047
+    },
+    "ours - personal popularity, ndcg@10": {
+      "mean": 0.06567923892325217,
+      "std": 0.0011619295778339258,
+      "min": 0.06493023029289235,
+      "max": 0.06701775563336287
+    },
+    "ours - ablation, ndcg@10": {
+      "mean": -0.0008876727008409654,
+      "std": 0.002117798705955349,
+      "min": -0.003156486981023332,
+      "max": 0.0010369449684616283
+    },
+    "ours recall@20": {
+      "mean": 0.7939413793996618,
+      "std": 0.001515775913086275,
+      "min": 0.7923351510191573,
+      "max": 0.7953466558694857
+    },
+    "ablation recall@20": {
+      "mean": 0.7893180360532376,
+      "std": 0.0017046326837649873,
+      "min": 0.7873539509052273,
+      "max": 0.7904121042273697
+    },
+    "ours - personal popularity, recall@20": {
+      "mean": 0.13038942272838472,
+      "std": 0.001515775913086275,
+      "min": 0.12878319434788021,
+      "max": 0.13179469919820863
+    },
+    "ours - ablation, recall@20": {
+      "mean": 0.004623343346424187,
+      "std": 0.0005798965977433848,
+      "min": 0.003954278283226587,
+      "max": 0.0049812001139299955
+    },
+    "ours ndcg@10, taper (race in 0-3 weeks)": {
+      "mean": 0.3035398717248073,
+      "std": 0.0005594172209437091,
+      "min": 0.3029232252358072,
+      "max": 0.3040148021654043
+    },
+    "ablation ndcg@10, taper (race in 0-3 weeks)": {
+      "mean": 0.2705967796148512,
+      "std": 0.0032125192301783448,
+      "min": 0.2670452719457175,
+      "max": 0.27330009733472677
+    },
+    "race-context gain ndcg@10, taper (race in 0-3 weeks)": {
+      "mean": 0.03294309210995614,
+      "std": 0.003529855008752538,
+      "min": 0.030381490438483705,
+      "max": 0.0369695302196868
+    },
+    "ours ndcg@10, peak (4-10 weeks out)": {
+      "mean": 0.2712050649393188,
+      "std": 0.001737652577738664,
+      "min": 0.26966012088020364,
+      "max": 0.2730862738049089
+    },
+    "ablation ndcg@10, peak (4-10 weeks out)": {
+      "mean": 0.27275346605678225,
+      "std": 0.0015837351535805486,
+      "min": 0.2709983949430321,
+      "max": 0.2740759859683785
+    },
+    "race-context gain ndcg@10, peak (4-10 weeks out)": {
+      "mean": -0.001548401117463405,
+      "std": 0.0006882458795837896,
+      "min": -0.002317217126092175,
+      "max": -0.0009897121634696027
+    },
+    "ours ndcg@10, post-race recovery (0-8 weeks after)": {
+      "mean": 0.33555034440291953,
+      "std": 0.002794881009436938,
+      "min": 0.3325091383639043,
+      "max": 0.3380061796011422
+    },
+    "ablation ndcg@10, post-race recovery (0-8 weeks after)": {
+      "mean": 0.33710887818805,
+      "std": 0.0033952502988447487,
+      "min": 0.3332250868495469,
+      "max": 0.33951429108571
+    },
+    "race-context gain ndcg@10, post-race recovery (0-8 weeks after)": {
+      "mean": -0.0015585337851304708,
+      "std": 0.0050296366736944185,
+      "min": -0.007005152721805741,
+      "max": 0.0029106283941652267
+    },
+    "ours ndcg@10, no race context": {
+      "mean": 0.3411200146155884,
+      "std": 0.0015356312985437223,
+      "min": 0.33991992501825924,
+      "max": 0.3428505470098744
+    },
+    "ablation ndcg@10, no race context": {
+      "mean": 0.34952528367533103,
+      "std": 0.003687826340234481,
+      "min": 0.3453376309025101,
+      "max": 0.35228824107017037
+    },
+    "race-context gain ndcg@10, no race context": {
+      "mean": -0.008405269059742593,
+      "std": 0.0032657757390813875,
+      "min": -0.01103005403505336,
+      "max": -0.004748059083878431
+    },
+    "taper gain recall@20": {
+      "mean": 0.054274719054638286,
+      "std": 0.005222935421971051,
+      "min": 0.04983428037020554,
+      "max": 0.06002918975172811
+    }
+  }
+}
