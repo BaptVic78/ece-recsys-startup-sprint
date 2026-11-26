@@ -1,0 +1,112 @@
+{
+  "model": "no_race_context",
+  "best_epoch": 6,
+  "curve": [
+    {
+      "epoch": 1,
+      "train_loss": 3.7219610552215574,
+      "validation_loss": 3.5986594384765627,
+      "validation_ndcg@10": 0.2583276422883055,
+      "validation_recall@20": 0.7213474804282318,
+      "seconds": 566.8
+    },
+    {
+      "epoch": 2,
+      "train_loss": 3.5497594642333983,
+      "validation_loss": 3.5207504638671874,
+      "validation_ndcg@10": 0.27850307694691184,
+      "validation_recall@20": 0.7520175270781286,
+      "seconds": 556.0
+    },
+    {
+      "epoch": 3,
+      "train_loss": 3.4981327093200685,
+      "validation_loss": 3.4721406884765624,
+      "validation_ndcg@10": 0.29321797973745256,
+      "validation_recall@20": 0.7667976293080452,
+      "seconds": 568.5
+    },
+    {
+      "epoch": 4,
+      "train_loss": 3.4691609446563723,
+      "validation_loss": 3.459958544921875,
+      "validation_ndcg@10": 0.2979077726426476,
+      "validation_recall@20": 0.7683124758062263,
+      "seconds": 580.1
+    },
+    {
+      "epoch": 5,
+      "train_loss": 3.4483174722137453,
+      "validation_loss": 3.4378738232421875,
+      "validation_ndcg@10": 0.303790060340739,
+      "validation_recall@20": 0.7761258678783867,
+      "seconds": 594.1
+    },
+    {
+      "epoch": 6,
+      "train_loss": 3.4360266017913816,
+      "validation_loss": 3.4205716357421876,
+      "validation_ndcg@10": 0.30652497580783344,
+      "validation_recall@20": 0.7789788324444789,
+      "seconds": 590.9
+    }
+  ],
+  "test_loss": 3.3916893202559084,
+  "test": {
+    "no_race_context": {
+      "ndcg@10": 0.31955337432942865,
+      "recall@10": 0.5793168068302048,
+      "ndcg@20": 0.37222791840585917,
+      "recall@20": 0.7873539509052273,
+      "mrr": 0.2618795702851125,
+      "users": 15097,
+      "targets": 694116
+    }
+  },
+  "phases": {
+    "no_race_context": {
+      "taper (race in 0-3 weeks)": {
+        "ndcg@10": 0.2714449695641093,
+        "recall@10": 0.5154985258699833,
+        "ndcg@20": 0.3279641265871429,
+        "recall@20": 0.739326877982913,
+        "mrr": 0.2213921129333905,
+        "users": 7982,
+        "targets": 69094
+      },
+      "peak (4-10 weeks out)": {
+        "ndcg@10": 0.2709983949430321,
+        "recall@10": 0.514538720787657,
+        "ndcg@20": 0.3251343418947254,
+        "recall@20": 0.7286338112546165,
+        "mrr": 0.2205094992451051,
+        "users": 7793,
+        "targets": 79765
+      },
+      "post-race recovery (0-8 weeks after)": {
+        "ndcg@10": 0.3332250868495469,
+        "recall@10": 0.600995981030858,
+        "ndcg@20": 0.386674340869999,
+        "recall@20": 0.8118179904127452,
+        "mrr": 0.27260579989790706,
+        "users": 7813,
+        "targets": 142122
+      },
+      "no race context": {
+        "ndcg@10": 0.3453376309025101,
+        "recall@10": 0.6106159808818096,
+        "ndcg@20": 0.3961569225332917,
+        "recall@20": 0.8111382786592966,
+        "mrr": 0.2846504057689206,
+        "users": 11833,
+        "targets": 403135
+      }
+    }
+  },
+  "exposure": {
+    "no_race_context": {
+      "coverage@10": 1.0,
+      "mean_popularity_rank@10": 15.505298
+    }
+  }
+}
