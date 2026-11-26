@@ -102,14 +102,15 @@ Reproduce with `python -m marathon.train`, `python -m marathon.train --no-race-c
 
 **What sampling gains and costs.** `python -m marathon.plan_eval` compares generated weeks with what 500 test runners actually ran, filling their real run dates from their real history ([results/marathon/PLAN_DIVERSITY.md](results/marathon/PLAN_DIVERSITY.md)):
 
-| Weeks | Distinct types / runs | Consecutive repeats | Weekly km | JS divergence of session types vs real | Same type as real day |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Real | 0.92 | 0.07 | 47.4 | — | 1.000 |
-| Greedy | 0.60 | 0.44 | 45.4 | 0.170 | 0.104 |
-| Sampled | 0.93 | 0.06 | 46.6 | 0.013 | 0.043 |
+| Weeks | Distinct types / runs | Consecutive repeats | Weekly km | JS divergence of session types vs real | Same type as real day | Weekly km abs. error |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Real | 0.92 | 0.07 | 47.4 | — | 1.000 | 0.0 |
+| Greedy | 0.60 | 0.44 | 45.4 | 0.170 | 0.104 | 11.0 |
+| **Sampled (default)** | 0.92 | 0.06 | 47.2 | 0.014 | 0.059 | 11.0 |
+| Phase popularity sampled (ignores the runner) | 0.96 | 0.03 | 49.0 | 0.016 | 0.023 | 17.9 |
 
 - Sampled weeks have the variety, the long/short spread and the overall mix of real training weeks.
-- Greedy matches the session actually run on more days (10.4% against 4.3%), because it always bets on the most likely type.
-- Variety and mix measure realism, not personalisation: sampling the phase-popularity fallback, which ignores the runner, matches them too. On the 12 committed demo runners (43 real weeks, `python -m marathon.plan_eval --demo`, [results](results/marathon/PLAN_DIVERSITY_DEMO.md)), it reached 0.96 distinct types per run and 1% repeats, like the model's sampled weeks (0.93 and 8%), but matched the real session on 1.8% of days and missed the weekly volume by 16.6 km, against 6.1% and 12.0 km for sampled weeks and 14.9% and 8.5 km for greedy. The runner's history shows in the per-day match and the weekly volume. This sample is small: treat the demo figures as indicative.
+- Greedy matches the session actually run on more days (10.4% against 5.9%), because it always bets on the most likely type.
+- Variety and mix measure realism, not personalisation. Sampling the phase-popularity fallback, which ignores the runner, matches them too. However, it matches the real session on only 2.3% of days and misses the weekly volume by 17.9 km, against 5.9% and 11.0 km for the model's sampled weeks. The runner's history shows in the per-day match and the weekly volume. The 12 committed demo runners show the same pattern (43 real weeks, `python -m marathon.plan_eval --demo`, [results](results/marathon/PLAN_DIVERSITY_DEMO.md); indicative only given the size).
 
-The full-test-set numbers in the table were produced before per-day seeding and without the baseline; rerun `python -m marathon.plan_eval` with the processed data to refresh them and add the baseline. The model's ranking quality is unchanged and is reported in MARATHON_RESULTS.md.
+The table comes from `python -m marathon.plan_eval` on the full test set, rerun after per-day seeding. The model's ranking quality is unchanged and is reported in MARATHON_RESULTS.md.

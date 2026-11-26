@@ -22,22 +22,33 @@
       "weekly_km_abs_error": 11.0378
     },
     "sample": {
-      "distinct_types_share": 0.9256,
-      "consecutive_repeat_rate": 0.0569,
-      "weekly_km": 46.567,
-      "longest_over_shortest": 3.0133,
-      "has_run_of_18km_or_more": 0.43,
-      "type_accuracy": 0.0431,
-      "weekly_km_abs_error": 11.1348
+      "distinct_types_share": 0.9187,
+      "consecutive_repeat_rate": 0.0611,
+      "weekly_km": 47.21,
+      "longest_over_shortest": 2.9835,
+      "has_run_of_18km_or_more": 0.444,
+      "type_accuracy": 0.0589,
+      "weekly_km_abs_error": 10.9559
+    },
+    "phase_sample": {
+      "distinct_types_share": 0.9617,
+      "consecutive_repeat_rate": 0.0251,
+      "weekly_km": 49.035,
+      "longest_over_shortest": 3.685,
+      "has_run_of_18km_or_more": 0.502,
+      "type_accuracy": 0.023,
+      "weekly_km_abs_error": 17.931
     }
   },
   "js_divergence_to_real_type_distribution": {
     "greedy": 0.16996902774784017,
-    "sample": 0.013299455251666169
+    "sample": 0.014008690188005792,
+    "phase_sample": 0.01584037461041488
   },
   "distinct_types_used": {
     "real": 65,
     "greedy": 53,
-    "sample": 66
+    "sample": 65,
+    "phase_sample": 66
   }
 }
