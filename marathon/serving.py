@@ -7,13 +7,14 @@ because the model was only trained with at least that much history.
 """
 
 import json
+import math
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
 
-from marathon.data import (DISTANCE_POINTS, INTENSITY_EDGES, INTENSITY_POINTS, MIN_SESSION_KM, NUM_ITEMS,
+from marathon.data import (DISTANCE_POINTS, INTENSITY_EDGES, INTENSITY_POINTS, MIN_SESSION_KM, NUM_ITEMS, PACE_RANGE,
                            annotate_sessions, describe_item, plausible_pace)
 from marathon.model import ContextCrossAttentionRecommender
 from marathon.sequences import MIN_HISTORY, RACE_BUCKETS, SessionStore, item_attributes, race_bucket
@@ -39,13 +40,16 @@ def phase_name(days_to_race):
 def prescription(item, reference_pace):
     distance_band, intensity_band = divmod(int(item) - 1, len(INTENSITY_EDGES) + 1)
     km = DISTANCE_POINTS[distance_band]
-    pace = reference_pace * INTENSITY_POINTS[intensity_band]
+    # Keep every prescription inside the quality rule the API applies when it is logged back:
+    # clip the pace, then round the duration to whole minutes that still satisfy the rule.
+    pace = min(max(reference_pace * INTENSITY_POINTS[intensity_band], PACE_RANGE[0]), PACE_RANGE[1])
+    minutes = min(max(round(km * pace), math.ceil(km * PACE_RANGE[0])), math.floor(km * PACE_RANGE[1]))
     info = describe_item(item)
     range_text = f"{info['km_min']:g}+ km" if info["km_max"] is None else f"{info['km_min']:g}-{info['km_max']:g} km"
     seconds = round(pace * 60)
     return {"item": int(item), "title": f"{km:g} km {info['intensity']} run", "distance_range": range_text,
             "intensity": info["intensity"], "km": km, "pace_min_per_km": round(pace, 2),
-            "pace": f"{seconds // 60}:{seconds % 60:02d}/km", "minutes": round(km * pace)}
+            "pace": f"{seconds // 60}:{seconds % 60:02d}/km", "minutes": minutes}
 
 
 def export_phase_popularity(sessions_path, model_dir):

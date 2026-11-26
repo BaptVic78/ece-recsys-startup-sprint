@@ -15,7 +15,7 @@ os.environ["MARATHON_SKIP_APP"] = "1"
 from fastapi.testclient import TestClient  # noqa: E402
 
 from marathon.api import create_app  # noqa: E402
-from marathon.data import NUM_ITEMS, annotate_sessions  # noqa: E402
+from marathon.data import NUM_ITEMS, annotate_sessions, plausible_pace  # noqa: E402
 from marathon.model import ContextCrossAttentionRecommender  # noqa: E402
 from marathon.sequences import RACE_BUCKETS, SessionStore, item_attributes  # noqa: E402
 from marathon.serving import Recommender, prescription  # noqa: E402
@@ -128,6 +128,23 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(plan["start_date"], "2019-09-03")
         self.assertTrue(all(day["date"] >= "2019-09-03" for day in plan["days"]))
         self.assertTrue(all(len(day["recommendations"]) == 3 for day in plan["days"]))
+
+    def test_every_recommendation_can_be_logged_back_at_both_pace_bounds(self):
+        # Reviewer's case: one 3 km / 45 min session (15 min/km); and the fast bound, 2.5 min/km.
+        for user_id, km, minutes in (("slow", 3.0, 45.0), ("fast", 10.0, 25.0)):
+            with self.subTest(user=user_id):
+                self.client.post("/users", json={"user_id": user_id, "race_date": "2019-09-29",
+                                                 "sessions": [{"date": "2019-08-31", "km": km, "minutes": minutes}]})
+                rec = self.client.post("/recommend", json={"user_id": user_id, "date": "2019-09-01",
+                                                           "top_k": NUM_ITEMS}).json()
+                for item in rec["recommendations"]:
+                    self.assertTrue(plausible_pace(item["km"], item["minutes"]), item)
+                    self.assertTrue(plausible_pace(item["km"], item["km"] * item["pace_min_per_km"]), item)
+                top = rec["recommendations"][0]
+                logged = self.client.post("/log_interaction", json={
+                    "user_id": user_id, "type": "completed", "date": "2019-09-01", "rec_id": rec["rec_id"],
+                    "item": top["item"], "km": top["km"], "minutes": top["minutes"]})
+                self.assertEqual(logged.status_code, 200, logged.text)
 
     def test_invalid_interactions_are_rejected(self):
         self.client.post("/users", json={"user_id": "lea", "race_date": "2019-09-29"})
