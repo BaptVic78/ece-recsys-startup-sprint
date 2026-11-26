@@ -4,9 +4,9 @@
 
 StridePlan recommends a marathon runner's next training sessions. You declare your race date. Every day you plan to run, the app ranks 66 session types for you and turns the best ones into concrete sessions (distance, pace, duration). It also builds the coming week. Log a completed, skipped or missed session and the next recommendations change.
 
-The model is a **context-aware sequential Transformer** after CARCA (Rashed, Elsayed & Schmidt-Thieme, *Context and Attribute-Aware Sequential Recommendation via Cross-Attention*, RecSys 2022). It was trained on 1.2 million sessions of 15,518 runners who completed a 2019 World Marathon Major. The data is the public [BMClab dataset](https://figshare.com/articles/dataset/A_public_dataset_on_long-distance_running_training_in_2019_and_2020/16620238) (CC BY 4.0). The innovation is the **race-calendar context**: the model knows how many weeks remain before your race and how long ago your last race was. On the test period (September to December 2019), the model reaches NDCG@10 0.3225 and Recall@20 0.7953. Most-popular reaches 0.1992 and 0.6240; personal popularity, the strongest baseline, reaches 0.2555 and 0.6636. In the taper weeks, the race context adds +0.037 NDCG@10 over the same model without it, with a paired-bootstrap 95% interval of [+0.035, +0.039]. Moving only the race date makes the recommended distance fall from 14.8 km three weeks out to 7.9 km two days out: the model learned to taper from data.
+The model is a **context-aware sequential Transformer** after CARCA (Rashed, Elsayed & Schmidt-Thieme, *Context and Attribute-Aware Sequential Recommendation via Cross-Attention*, RecSys 2022). It was trained on 1.2 million sessions of 15,518 runners who completed a 2019 World Marathon Major. The data is the public [BMClab dataset](https://figshare.com/articles/dataset/A_public_dataset_on_long-distance_running_training_in_2019_and_2020/16620238) (CC BY 4.0). The innovation is the **race-calendar context**: the model knows how many weeks remain before your race and how long ago your last race was. On the test period (September to December 2019), the model reaches NDCG@10 0.3225 and Recall@20 0.7953. Most-popular reaches 0.1992 and 0.6240; personal popularity, the strongest baseline, reaches 0.2555 and 0.6636. In the taper weeks, the race context adds +0.037 NDCG@10 over the same model without it, with a paired-bootstrap 95% interval of [+0.035, +0.039]. Moving only the race date (2,000 test runners, one session each) makes the expected recommended distance fall from 14.9 km three weeks out to 7.7 km two days out: the model learned to taper from data.
 
-**Results:** see [results/marathon/MARATHON_RESULTS.md](results/marathon/MARATHON_RESULTS.md). **Method, data and leakage policy:** see [MARATHON_README.md](MARATHON_README.md).
+**Results:** see [results/marathon/MARATHON_RESULTS.md](results/marathon/MARATHON_RESULTS.md), and [results/marathon/SEEDS.md](results/marathon/SEEDS.md) for the same claims checked over 3 training seeds. **Method, data and leakage policy:** see [MARATHON_README.md](MARATHON_README.md).
 
 ## Quick start (Docker, < 5 minutes)
 
@@ -103,8 +103,8 @@ To use the app from another machine on the same Wi-Fi, run step 5 with `MARATHON
 | `GET /catalogue` | The 66 session types |
 | `POST /users` | Create a runner: race date, optional goal time, recent sessions |
 | `GET /users/{user_id}` | Profile, sessions and interaction log |
-| `POST /recommend` | Ranked session types for one day, from the trained model |
-| `POST /plan` | Next days on the chosen weekdays, rolled forward with the model |
+| `POST /recommend` | Ranked session types for one day, from the trained model, with their probability, and the session `planned` for that day |
+| `POST /plan` | Next days on the chosen weekdays, rolled forward with the model. Each day's `planned` session is drawn from the model's distribution (`strategy: "sample"`, the default, seeded by runner and date, so it matches `/recommend` and stays put while the plan is followed), or set `strategy: "greedy"` for the top session every day |
 | `POST /log_interaction` | `completed` (with km, minutes and optional effort), `skipped` or `missed`; written to SQLite |
 | `GET /demo/runners`, `POST /demo/{runner}/load` | Demo runners from the test period |
 
@@ -150,13 +150,29 @@ The image workflow also builds and tests the container on PRs. On `main`, it
 publishes the tested image to `ghcr.io/baptvic78/ece-recsys-startup-sprint`,
 with `latest` and commit tags.
 
-After the first publication, a package owner must set the GHCR package visibility
-to **Public** and check that it can be pulled without a login.
+The GHCR package is public: an anonymous pull works, with no login.
 For the CI failure check, temporarily add a failing test on the PR, record the red
 run, remove the test and record the green run. Keep no failing test on `main`.
 
-For Week 3 Q6, a teammate who did not write the setup must time clone-to-first-
-recommendation on a clean machine and attach the timing and a screenshot to the PR.
+### Clean-machine check (Week 3 Q6)
+
+Every team member wrote part of the code, so nobody could time the README on a machine where the
+project had never been opened. Two runs replace that check. Both start from an empty directory,
+follow the quick start word for word (`git clone`, `docker compose up -d --wait`) and then run
+`scripts/check_docker.py`:
+
+| Machine | Clone to app ready | Image | End-to-end check |
+| --- | ---: | --- | --- |
+| Fresh GitHub `ubuntu-latest` VM, no login, no local images ([workflow](.github/workflows/clean-machine.yml), [run](https://github.com/BaptVic78/ece-recsys-startup-sprint/actions/runs/45898327838)) | 42 s | pulled from GHCR | passed (recommendation in 0.013 s) |
+| Team laptop (Windows, Docker Desktop), fresh clone, no StridePlan image or volume beforehand, ports 8010/8502 via `.env` | 147 s | pulled from GHCR | passed (recommendation in 0.061 s) |
+
+The end-to-end check covers:
+- a recommendation from the trained model;
+- `completed`, `skipped` and `missed` saved through `/log_interaction`;
+- the saved data unchanged after `docker compose restart`;
+- a generated plan.
+
+The workflow runs on every PR and push to `main`, and fails above 300 s.
 Local checks are recorded in [docs/DOCKER_CHECKS.md](docs/DOCKER_CHECKS.md).
 
 ## Repository

@@ -18,7 +18,7 @@ from marathon.api import create_app  # noqa: E402
 from marathon.data import NUM_ITEMS, annotate_sessions, plausible_pace  # noqa: E402
 from marathon.model import ContextCrossAttentionRecommender  # noqa: E402
 from marathon.sequences import RACE_BUCKETS, SessionStore, item_attributes  # noqa: E402
-from marathon.serving import Recommender, prescription  # noqa: E402
+from marathon.serving import Recommender, nucleus_sample, phase_name, prescription, session_probabilities  # noqa: E402
 
 
 def save_small_model(directory):
@@ -78,6 +78,46 @@ class ServingTest(unittest.TestCase):
         self.assertLess(noisy["reference_pace"], 15)
         self.assertTrue(all(item["minutes"] < 400 for item in noisy["recommendations"]))
 
+    def test_nucleus_sampling_stays_in_the_nucleus_and_is_seeded(self):
+        probabilities = np.array([0.5, 0.3, 0.15, 0.05])
+        draws = [nucleus_sample(probabilities, 0.8, np.random.default_rng(seed)) for seed in range(200)]
+        self.assertEqual(set(draws), {0, 1})  # 0.5 + 0.3 reaches 0.8, so types 2 and 3 are never drawn
+        self.assertEqual(nucleus_sample(probabilities, 0.8, np.random.default_rng(3)),
+                         nucleus_sample(probabilities, 0.8, np.random.default_rng(3)))
+        self.assertAlmostEqual(session_probabilities(np.array([1.0, 1.0]), "model").sum(), 1.0)
+        self.assertEqual(session_probabilities(np.array([3.0, 1.0]), "phase_popularity").tolist(), [0.75, 0.25])
+
+    def test_sampled_plan_is_reproducible_and_greedy_takes_the_top_session(self):
+        dates = [date(2019, 9, 1) + timedelta(days=offset) for offset in range(0, 14, 2)]
+        greedy = self.recommender.plan(history(), dates, date(2019, 9, 29), strategy="greedy")
+        self.assertTrue(all(day["planned"]["rank"] == 1 for day in greedy))
+        first = self.recommender.plan(history(), dates, date(2019, 9, 29), strategy="sample", seed=5)
+        again = self.recommender.plan(history(), dates, date(2019, 9, 29), strategy="sample", seed=5)
+        self.assertEqual([d["planned"] for d in first], [d["planned"] for d in again])
+        planned = [d["planned"]["item"] for d in first]
+        self.assertTrue(all(1 <= item <= NUM_ITEMS for item in planned))
+        # Each planned session is fed back as done: the next day's history grows by one.
+        self.assertEqual([d["history_sessions"] for d in first], list(range(15, 15 + len(dates))))
+        with self.assertRaises(ValueError):
+            self.recommender.plan(history(), dates, strategy="beam")
+
+    def test_following_a_sampled_plan_keeps_the_rest_of_it(self):
+        dates = [date(2019, 9, 1) + timedelta(days=offset) for offset in range(0, 14, 2)]
+        first = self.recommender.plan(history(), dates, date(2019, 9, 29), strategy="sample", seed=11)
+        done = first[0]["planned"]
+        followed = history() + [{"date": dates[0], "km": done["km"], "minutes": done["minutes"]}]
+        rest = self.recommender.plan(followed, dates[1:], date(2019, 9, 29), strategy="sample", seed=11)
+        self.assertEqual([d["planned"] for d in first[1:]], [d["planned"] for d in rest])
+        # The day's session is the same whether it is asked for alone or inside a plan.
+        alone = self.recommender.recommend(history(), dates[0], date(2019, 9, 29), 3, strategy="sample", seed=11)
+        self.assertEqual(alone["planned"], done)
+        self.assertAlmostEqual(sum(self.recommender.recommend(history(), dates[0], date(2019, 9, 29), NUM_ITEMS)
+                                   ["recommendations"][i]["probability"] for i in range(NUM_ITEMS)), 1.0, places=6)
+
+    def test_phase_label_counts_days(self):
+        self.assertEqual(phase_name(1), "taper, race in 1 day")
+        self.assertEqual(phase_name(2), "taper, race in 2 days")
+
     def test_plan_rolls_forward_and_prescription_is_concrete(self):
         days = self.recommender.plan(history(), [date(2019, 9, 3), date(2019, 9, 1)], date(2019, 9, 29))
         self.assertEqual([day["date"] for day in days], ["2019-09-01", "2019-09-03"])
@@ -128,6 +168,32 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(plan["start_date"], "2019-09-03")
         self.assertTrue(all(day["date"] >= "2019-09-03" for day in plan["days"]))
         self.assertTrue(all(len(day["recommendations"]) == 3 for day in plan["days"]))
+        self.assertEqual(plan["strategy"], "sample")
+        same = self.client.post("/plan", json={"user_id": "lea", "days": 7, "run_weekdays": [1, 3, 5, 6]}).json()
+        self.assertEqual([d["planned"] for d in plan["days"]], [d["planned"] for d in same["days"]])
+        # A planned session outside the top-3 alternatives can still be logged against its rec_id.
+        day = plan["days"][0]
+        logged = self.client.post("/log_interaction", json={
+            "user_id": "lea", "type": "completed", "date": day["date"], "rec_id": day["rec_id"],
+            "item": day["planned"]["item"], "km": day["planned"]["km"], "minutes": day["planned"]["minutes"]})
+        self.assertEqual(logged.status_code, 200, logged.text)
+
+    def test_recommend_and_plan_show_the_same_session_for_a_day(self):
+        sessions = [{**s, "date": str(s["date"])} for s in history()]
+        self.client.post("/users", json={"user_id": "lea", "race_date": "2019-09-29", "sessions": sessions})
+        day = self.client.post("/recommend", json={"user_id": "lea", "date": "2019-09-01", "top_k": 1}).json()
+        plan = self.client.post("/plan", json={"user_id": "lea", "start_date": "2019-09-01", "days": 7,
+                                               "run_weekdays": [6, 1]}).json()
+        self.assertEqual(plan["days"][0]["date"], "2019-09-01")
+        self.assertEqual(day["planned"], plan["days"][0]["planned"])
+        # The planned session can be logged against the /recommend list even when it ranks below top_k.
+        logged = self.client.post("/log_interaction", json={
+            "user_id": "lea", "type": "skipped", "date": "2019-09-01", "rec_id": day["rec_id"],
+            "item": day["planned"]["item"]})
+        self.assertEqual(logged.status_code, 200, logged.text)
+        greedy = self.client.post("/recommend", json={"user_id": "lea", "date": "2019-09-01", "top_k": 1,
+                                                      "strategy": "greedy"}).json()
+        self.assertEqual(greedy["planned"]["item"], greedy["recommendations"][0]["item"])
 
     def test_every_recommendation_can_be_logged_back_at_both_pace_bounds(self):
         # Reviewer's case: one 3 km / 45 min session (15 min/km); and the fast bound, 2.5 min/km.

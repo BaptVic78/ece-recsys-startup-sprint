@@ -84,5 +84,34 @@ Two self-attention layers encode the last 32 sessions. Every candidate type then
 - **Innovation.** The race context matters where it should. In the taper (race within 3 weeks), NDCG@10 rises from 0.267 to 0.304, +0.037 with 95% interval [+0.035, +0.039], and Recall@20 gains +0.060. It is neutral in peak and recovery weeks. It costs 0.009 NDCG@10 when no race is planned, so the overall NDCG@10 is unchanged; overall Recall@20 gains +0.005.
 - **Taper check.** We take 2,000 distinct test runners, one session each, keep their histories and move only the race date. The expected recommended distance peaks at 14.9 km three weeks out, then falls to 7.7 km two days before the race. The ablation stays flat at 13.6 km. No rule encodes the taper: the model learned it from data.
 - **Learning curves.** Training and validation losses decrease together, with no divergence. Validation NDCG@10 was still rising slowly at epoch 6, so more epochs might help both models.
+- **Robust to training randomness.** The full model and the ablation were retrained with seeds 7 and 123 (`python -m marathon.seeds train`, then `report`). Every claim above holds for all 3 seeds: the model beats personal popularity by +0.066 ± 0.001 NDCG@10, and the race context adds +0.033 ± 0.004 NDCG@10 and +0.054 ± 0.005 Recall@20 in the taper (mean ± std over seeds 42, 7 and 123). Details: [results/marathon/SEEDS.md](results/marathon/SEEDS.md).
 
 Reproduce with `python -m marathon.train`, `python -m marathon.train --no-race-context` and `python -m marathon.report`. Allow about 1 hour per model on an 8-core laptop when nothing else is running.
+
+## Weekly plans that vary like real training
+
+`POST /plan` rolls the model forward over the chosen run days: each planned session is treated as done before ranking the next day. The first version always took the top-ranked type (greedy decoding), and weeks repeated one session at the same pace.
+
+**Why greedy weeks repeat.** The model is uncertain about any single day: on the demo runners, the top type has a median probability of 9% out of 66, about one point ahead of the second. The most likely type depends mostly on the runner's history, which changes little within a week, so taking it every day repeats it. Feeding the planned session back is not the main cause: ranking each day from the real history only, with nothing appended, still repeats the top type on 33% of consecutive days, against 39% with the rollout. The model predicts the next session a runner like this is likely to do; it is not trained to balance a week.
+
+**What the plan does now.** Each day's session is **drawn from the model's own distribution**, restricted to the types covering 90% of the probability (nucleus sampling, `marathon/serving.py`). Each day has its own generator, seeded by the runner and that day's date, so:
+- the same day shows the same session in `POST /recommend` (the Today view) and in `POST /plan` (the week);
+- a plan stays the same while the runner follows it; only a different logged session changes the days after it;
+- every response gives the planned session's rank and probability, so a reader sees how likely the model found it.
+
+`strategy: "greedy"` is still available on both endpoints.
+
+**What sampling gains and costs.** `python -m marathon.plan_eval` compares generated weeks with what 500 test runners actually ran, filling their real run dates from their real history ([results/marathon/PLAN_DIVERSITY.md](results/marathon/PLAN_DIVERSITY.md)):
+
+| Weeks | Distinct types / runs | Consecutive repeats | Weekly km | JS divergence of session types vs real | Same type as real day | Weekly km abs. error |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Real | 0.92 | 0.07 | 47.4 | — | 1.000 | 0.0 |
+| Greedy | 0.60 | 0.44 | 45.4 | 0.170 | 0.104 | 11.0 |
+| **Sampled (default)** | 0.92 | 0.06 | 47.2 | 0.014 | 0.059 | 11.0 |
+| Phase popularity sampled (ignores the runner) | 0.96 | 0.03 | 49.0 | 0.016 | 0.023 | 17.9 |
+
+- Sampled weeks have the variety, the long/short spread and the overall mix of real training weeks.
+- Greedy matches the session actually run on more days (10.4% against 5.9%), because it always bets on the most likely type.
+- Variety and mix measure realism, not personalisation. Sampling the phase-popularity fallback, which ignores the runner, matches them too. However, it matches the real session on only 2.3% of days and misses the weekly volume by 17.9 km, against 5.9% and 11.0 km for the model's sampled weeks. The runner's history shows in the per-day match and the weekly volume. The 12 committed demo runners show the same pattern (43 real weeks, `python -m marathon.plan_eval --demo`, [results](results/marathon/PLAN_DIVERSITY_DEMO.md); indicative only given the size).
+
+The table comes from `python -m marathon.plan_eval` on the full test set, rerun after per-day seeding. The model's ranking quality is unchanged and is reported in MARATHON_RESULTS.md.
