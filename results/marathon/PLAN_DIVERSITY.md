@@ -10,6 +10,8 @@
 
 Jensen-Shannon divergence between the session types used across all generated weeks and those of the real weeks (0 = identical, 1 = disjoint): greedy 0.170, sample 0.013. Distinct session types used: real 65, greedy 53, sample 66.
 
-Greedy decoding always returns the single most likely type, then feeds it back as if done, so weeks repeat one session. Sampling from the same model reproduces the variety of real weeks. Per-day type accuracy is low for both because a runner's exact session on a given day is hard to predict; the ranking quality of the model itself is measured in MARATHON_RESULTS.md.
+Greedy decoding returns the single most likely type every day. No type is very likely and the most likely one changes little within a week, so greedy weeks repeat one session. Sampling from the same model reproduces the variety of real weeks but matches the session actually run on fewer days. Per-day type accuracy is low for both because a runner's exact session on a given day is hard to predict; the ranking quality of the model itself is measured in MARATHON_RESULTS.md.
 
 Reproduce: `python -m marathon.plan_eval` (needs the processed data).
+
+These figures were produced at 5594ff4, before per-day seeding and without the phase-popularity baseline. Rerun the command above to refresh them.

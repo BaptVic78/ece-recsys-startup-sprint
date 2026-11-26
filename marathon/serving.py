@@ -29,7 +29,7 @@ def phase_name(days_to_race):
         return "race day"
     weeks = days_to_race // 7 + 1
     if weeks <= 3:
-        return f"taper, race in {days_to_race} days"
+        return f"taper, race in {days_to_race} day{'s' if days_to_race > 1 else ''}"
     if weeks <= 10:
         return f"peak training, race in {weeks} weeks"
     if weeks <= 21:
@@ -64,6 +64,15 @@ def session_probabilities(scores, strategy):
     else:
         weights = np.clip(scores, 0, None)
     return weights / weights.sum()
+
+
+def day_rng(seed, date):
+    """Generator for one planned day, from the seed and that day's date only.
+
+    A day's draw then changes only when the history before it changes: following the plan
+    and asking again from the next day returns the same remaining sessions.
+    """
+    return np.random.default_rng([int(seed), pd.Timestamp(date).toordinal()])
 
 
 def nucleus_sample(probabilities, top_p, rng):
@@ -161,39 +170,51 @@ class Recommender:
 
     def _day(self, scores, info, target_date, top_k):
         order = np.argsort(-scores, kind="stable")
-        items = [{"rank": rank + 1, "score": float(scores[index]), **prescription(index + 1, info["reference_pace"])}
+        probabilities = session_probabilities(scores, info["strategy"])
+        items = [{"rank": rank + 1, "score": float(scores[index]), "probability": float(probabilities[index]),
+                  **prescription(index + 1, info["reference_pace"])}
                  for rank, index in enumerate(order[:top_k])]
         return {"date": str(pd.Timestamp(target_date).date()), "phase": phase_name(info["days_to_race"]),
                 **info, "model": self.name, "recommendations": items}, order
 
-    def recommend(self, sessions, target_date, race_date=None, top_k=10):
+    def _planned(self, scores, info, order, target_date, strategy, seed, top_p):
+        """The session planned for one day: the top-ranked type, or a draw from the model's distribution."""
+        if strategy not in PLAN_STRATEGIES:
+            raise ValueError(f"strategy must be one of {PLAN_STRATEGIES}")
+        probabilities = session_probabilities(scores, info["strategy"])
+        if strategy == "greedy":
+            chosen = int(order[0])
+        else:
+            chosen = nucleus_sample(probabilities, top_p, day_rng(seed, target_date))
+        return {"rank": int(np.flatnonzero(order == chosen)[0]) + 1, "score": float(scores[chosen]),
+                "probability": float(probabilities[chosen]), **prescription(chosen + 1, info["reference_pace"])}
+
+    def recommend(self, sessions, target_date, race_date=None, top_k=10, strategy=None, seed=0, top_p=PLAN_TOP_P):
+        """Ranked session types for one day. With a `strategy`, also the session `planned` for that day,
+        drawn exactly as `plan` draws it, so a day shows the same session in both views."""
         scores, info = self.rank(sessions, target_date, race_date)
-        return self._day(scores, info, target_date, top_k)[0]
+        day, order = self._day(scores, info, target_date, top_k)
+        if strategy is not None:
+            day["planned"] = self._planned(scores, info, order, target_date, strategy, seed, top_p)
+            day["plan_strategy"] = strategy
+        return day
 
     def plan(self, sessions, run_dates, race_date=None, top_k=3, strategy="sample", seed=0, top_p=PLAN_TOP_P):
         """Roll the model forward over the run dates; each planned session is assumed done before the next.
 
         `strategy="sample"` (default) draws each day's session from the model's own distribution,
         restricted to the smallest set of types covering `top_p` of the probability (nucleus
-        sampling), with a seeded generator so a plan is reproducible. This keeps the variety the
-        model learned from real weeks. `strategy="greedy"` always takes the top-ranked type; it
-        maximises per-day accuracy but feeds its own choice back and repeats one session.
+        sampling). Each day has its own generator, seeded by `seed` and the date, so a plan is
+        reproducible and stays the same when the runner follows it. `strategy="greedy"` always
+        takes the top-ranked type: the most likely session each day, but the most likely session
+        rarely changes within a week, so greedy weeks repeat one session.
         """
         if strategy not in PLAN_STRATEGIES:
             raise ValueError(f"strategy must be one of {PLAN_STRATEGIES}")
-        rng = np.random.default_rng(seed)
         history = list(sessions)
         days = []
         for date in sorted(pd.Timestamp(d).normalize() for d in run_dates):
-            scores, info = self.rank(history, date, race_date)
-            day, order = self._day(scores, info, date, top_k)
-            if strategy == "greedy":
-                chosen = int(order[0])
-            else:
-                chosen = nucleus_sample(session_probabilities(scores, info["strategy"]), top_p, rng)
-            rank = int(np.flatnonzero(order == chosen)[0]) + 1
-            day["planned"] = {"rank": rank, "score": float(scores[chosen]), **prescription(chosen + 1, info["reference_pace"])}
-            day["plan_strategy"] = strategy
+            day = self.recommend(history, date, race_date, top_k, strategy=strategy, seed=seed, top_p=top_p)
             days.append(day)
             history.append({"date": date, "km": day["planned"]["km"], "minutes": day["planned"]["minutes"]})
         return days

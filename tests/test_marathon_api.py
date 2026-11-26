@@ -18,7 +18,7 @@ from marathon.api import create_app  # noqa: E402
 from marathon.data import NUM_ITEMS, annotate_sessions, plausible_pace  # noqa: E402
 from marathon.model import ContextCrossAttentionRecommender  # noqa: E402
 from marathon.sequences import RACE_BUCKETS, SessionStore, item_attributes  # noqa: E402
-from marathon.serving import Recommender, nucleus_sample, prescription, session_probabilities  # noqa: E402
+from marathon.serving import Recommender, nucleus_sample, phase_name, prescription, session_probabilities  # noqa: E402
 
 
 def save_small_model(directory):
@@ -101,6 +101,23 @@ class ServingTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.recommender.plan(history(), dates, strategy="beam")
 
+    def test_following_a_sampled_plan_keeps_the_rest_of_it(self):
+        dates = [date(2019, 9, 1) + timedelta(days=offset) for offset in range(0, 14, 2)]
+        first = self.recommender.plan(history(), dates, date(2019, 9, 29), strategy="sample", seed=11)
+        done = first[0]["planned"]
+        followed = history() + [{"date": dates[0], "km": done["km"], "minutes": done["minutes"]}]
+        rest = self.recommender.plan(followed, dates[1:], date(2019, 9, 29), strategy="sample", seed=11)
+        self.assertEqual([d["planned"] for d in first[1:]], [d["planned"] for d in rest])
+        # The day's session is the same whether it is asked for alone or inside a plan.
+        alone = self.recommender.recommend(history(), dates[0], date(2019, 9, 29), 3, strategy="sample", seed=11)
+        self.assertEqual(alone["planned"], done)
+        self.assertAlmostEqual(sum(self.recommender.recommend(history(), dates[0], date(2019, 9, 29), NUM_ITEMS)
+                                   ["recommendations"][i]["probability"] for i in range(NUM_ITEMS)), 1.0, places=6)
+
+    def test_phase_label_counts_days(self):
+        self.assertEqual(phase_name(1), "taper, race in 1 day")
+        self.assertEqual(phase_name(2), "taper, race in 2 days")
+
     def test_plan_rolls_forward_and_prescription_is_concrete(self):
         days = self.recommender.plan(history(), [date(2019, 9, 3), date(2019, 9, 1)], date(2019, 9, 29))
         self.assertEqual([day["date"] for day in days], ["2019-09-01", "2019-09-03"])
@@ -160,6 +177,23 @@ class ApiTest(unittest.TestCase):
             "user_id": "lea", "type": "completed", "date": day["date"], "rec_id": day["rec_id"],
             "item": day["planned"]["item"], "km": day["planned"]["km"], "minutes": day["planned"]["minutes"]})
         self.assertEqual(logged.status_code, 200, logged.text)
+
+    def test_recommend_and_plan_show_the_same_session_for_a_day(self):
+        sessions = [{**s, "date": str(s["date"])} for s in history()]
+        self.client.post("/users", json={"user_id": "lea", "race_date": "2019-09-29", "sessions": sessions})
+        day = self.client.post("/recommend", json={"user_id": "lea", "date": "2019-09-01", "top_k": 1}).json()
+        plan = self.client.post("/plan", json={"user_id": "lea", "start_date": "2019-09-01", "days": 7,
+                                               "run_weekdays": [6, 1]}).json()
+        self.assertEqual(plan["days"][0]["date"], "2019-09-01")
+        self.assertEqual(day["planned"], plan["days"][0]["planned"])
+        # The planned session can be logged against the /recommend list even when it ranks below top_k.
+        logged = self.client.post("/log_interaction", json={
+            "user_id": "lea", "type": "skipped", "date": "2019-09-01", "rec_id": day["rec_id"],
+            "item": day["planned"]["item"]})
+        self.assertEqual(logged.status_code, 200, logged.text)
+        greedy = self.client.post("/recommend", json={"user_id": "lea", "date": "2019-09-01", "top_k": 1,
+                                                      "strategy": "greedy"}).json()
+        self.assertEqual(greedy["planned"]["item"], greedy["recommendations"][0]["item"])
 
     def test_every_recommendation_can_be_logged_back_at_both_pace_bounds(self):
         # Reviewer's case: one 3 km / 45 min session (15 min/km); and the fast bound, 2.5 min/km.

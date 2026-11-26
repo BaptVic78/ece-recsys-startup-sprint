@@ -47,11 +47,19 @@ class UserRequest(BaseModel):
     sessions: list[Session] = Field(default_factory=list, max_length=400)
 
 
+STRATEGY_HELP = ("sample: draw the day's session from the model's distribution (varied, realistic weeks); "
+                 "greedy: always the top-ranked session")
+SEED_HELP = ("defaults to a hash of the user; each day's draw also depends on its date and on the history "
+             "before it, so a day keeps its session in /recommend and /plan and when the plan is followed")
+
+
 class RecommendRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     user_id: str = Field(min_length=1, max_length=100)
     date: Optional[Date] = None
     top_k: int = Field(default=10, ge=1, le=NUM_ITEMS, strict=True)
+    strategy: Literal[PLAN_STRATEGIES] = Field(default="sample", description=STRATEGY_HELP)
+    seed: Optional[int] = Field(default=None, ge=0, description=SEED_HELP)
 
 
 class PlanRequest(BaseModel):
@@ -62,11 +70,8 @@ class PlanRequest(BaseModel):
     run_weekdays: list[int] = Field(default=[1, 3, 5, 6], min_length=1, max_length=7,
                                     description="0 = Monday ... 6 = Sunday")
     top_k: int = Field(default=3, ge=1, le=10, strict=True)
-    strategy: Literal[PLAN_STRATEGIES] = Field(
-        default="sample", description="sample: draw each day from the model's distribution (varied, realistic weeks); "
-                                      "greedy: always the top-ranked session")
-    seed: Optional[int] = Field(default=None, ge=0, description="defaults to a hash of user and start date, "
-                                                                "so the same request returns the same plan")
+    strategy: Literal[PLAN_STRATEGIES] = Field(default="sample", description=STRATEGY_HELP)
+    seed: Optional[int] = Field(default=None, ge=0, description=SEED_HELP)
 
 
 class Interaction(BaseModel):
@@ -93,6 +98,17 @@ def check_session(km, minutes):
         raise ValueError(f"a session must be at least {MIN_SESSION_KM:g} km")
     if not plausible_pace(km, minutes):
         raise ValueError(f"pace must be between {PACE_RANGE[0]:g} and {PACE_RANGE[1]:g} min/km")
+
+
+def default_seed(user_id):
+    return zlib.crc32(user_id.encode())
+
+
+def offered_items(day):
+    """Items a runner may answer for a day: the ranked list and the planned session, which can rank lower."""
+    items = [item["item"] for item in day["recommendations"]]
+    planned = day.get("planned")
+    return items + ([planned["item"]] if planned and planned["item"] not in items else [])
 
 
 def goal_pace(goal_minutes):
@@ -148,9 +164,10 @@ def create_app(model_dir=MODEL_DIR, db_path=DB_PATH, demo_dir=DEMO_DIR):
         user = require_user(request.user_id)
         target = request.date or default_day(request.user_id)
         started = time.perf_counter()
-        result = recommender.recommend(store.sessions(request.user_id, before=target), target, user["race_date"], request.top_k)
-        result["rec_id"] = store.save_recommendation(request.user_id, target, recommender.name,
-                                                     [item["item"] for item in result["recommendations"]])
+        seed = request.seed if request.seed is not None else default_seed(request.user_id)
+        result = recommender.recommend(store.sessions(request.user_id, before=target), target, user["race_date"],
+                                       request.top_k, strategy=request.strategy, seed=seed)
+        result["rec_id"] = store.save_recommendation(request.user_id, target, recommender.name, offered_items(result))
         result["latency_ms"] = round((time.perf_counter() - started) * 1000, 1)
         result["goal_pace"] = goal_pace(user["goal_minutes"])
         return result
@@ -167,14 +184,11 @@ def create_app(model_dir=MODEL_DIR, db_path=DB_PATH, demo_dir=DEMO_DIR):
         if user["race_date"]:
             run_dates = [day for day in run_dates if str(day) < user["race_date"]]
         started = time.perf_counter()
-        seed = request.seed if request.seed is not None else zlib.crc32(f"{request.user_id}|{start}".encode())
+        seed = request.seed if request.seed is not None else default_seed(request.user_id)
         days = recommender.plan(store.sessions(request.user_id, before=start), run_dates, user["race_date"],
                                 request.top_k, strategy=request.strategy, seed=seed)
         for day in days:
-            # The planned session may come from outside the top_k alternatives; store it too so it can be logged.
-            items = [item["item"] for item in day["recommendations"]]
-            items += [day["planned"]["item"]] if day["planned"]["item"] not in items else []
-            day["rec_id"] = store.save_recommendation(request.user_id, day["date"], recommender.name, items)
+            day["rec_id"] = store.save_recommendation(request.user_id, day["date"], recommender.name, offered_items(day))
         return {"user_id": request.user_id, "start_date": str(start), "race_date": user["race_date"],
                 "goal_pace": goal_pace(user["goal_minutes"]), "strategy": request.strategy, "seed": seed, "days": days,
                 "latency_ms": round((time.perf_counter() - started) * 1000, 1)}

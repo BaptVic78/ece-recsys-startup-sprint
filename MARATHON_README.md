@@ -89,14 +89,27 @@ Reproduce with `python -m marathon.train`, `python -m marathon.train --no-race-c
 
 ## Weekly plans that vary like real training
 
-`POST /plan` rolls the model forward over the chosen run days: each planned session is treated as done before ranking the next day. The first version always took the top-ranked type (greedy decoding). Because that choice was fed back into the history, it was self-reinforcing, and weeks repeated one session at the same pace. Plans now **draw each day's session from the model's own distribution**, restricted to the types covering 90% of the probability (nucleus sampling, `marathon/serving.py`). The seed is a hash of the runner and the start date, so the same request returns the same plan.
+`POST /plan` rolls the model forward over the chosen run days: each planned session is treated as done before ranking the next day. The first version always took the top-ranked type (greedy decoding), and weeks repeated one session at the same pace.
 
-`python -m marathon.plan_eval` compares generated weeks with what 500 test runners actually ran, filling their real run dates from their real history ([results/marathon/PLAN_DIVERSITY.md](results/marathon/PLAN_DIVERSITY.md)):
+**Why greedy weeks repeat.** The model is uncertain about any single day: on the demo runners, the top type has a median probability of 9% out of 66, about one point ahead of the second. The most likely type depends mostly on the runner's history, which changes little within a week, so taking it every day repeats it. Feeding the planned session back is not the main cause: ranking each day from the real history only, with nothing appended, still repeats the top type on 33% of consecutive days, against 39% with the rollout. The model predicts the next session a runner like this is likely to do; it is not trained to balance a week.
 
-| Weeks | Distinct types / runs | Consecutive repeats | Weekly km | JS divergence of session types vs real |
-| --- | ---: | ---: | ---: | ---: |
-| Real | 0.92 | 0.07 | 47.4 | — |
-| Greedy (before) | 0.60 | 0.44 | 45.4 | 0.170 |
-| Sampled (now) | 0.93 | 0.06 | 46.6 | 0.013 |
+**What the plan does now.** Each day's session is **drawn from the model's own distribution**, restricted to the types covering 90% of the probability (nucleus sampling, `marathon/serving.py`). Each day has its own generator, seeded by the runner and that day's date, so:
+- the same day shows the same session in `POST /recommend` (the Today view) and in `POST /plan` (the week);
+- a plan stays the same while the runner follows it; only a different logged session changes the days after it;
+- every response gives the planned session's rank and probability, so a reader sees how likely the model found it.
 
-Greedy matched the real session type on 10.4% of days against 4.3% for sampling, because it always bets on the most likely type. Sampled weeks, however, have the variety, the long/short spread and the overall mix of real training weeks. The model's ranking quality is unchanged and is reported in MARATHON_RESULTS.md.
+`strategy: "greedy"` is still available on both endpoints.
+
+**What sampling gains and costs.** `python -m marathon.plan_eval` compares generated weeks with what 500 test runners actually ran, filling their real run dates from their real history ([results/marathon/PLAN_DIVERSITY.md](results/marathon/PLAN_DIVERSITY.md)):
+
+| Weeks | Distinct types / runs | Consecutive repeats | Weekly km | JS divergence of session types vs real | Same type as real day |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Real | 0.92 | 0.07 | 47.4 | — | 1.000 |
+| Greedy | 0.60 | 0.44 | 45.4 | 0.170 | 0.104 |
+| Sampled | 0.93 | 0.06 | 46.6 | 0.013 | 0.043 |
+
+- Sampled weeks have the variety, the long/short spread and the overall mix of real training weeks.
+- Greedy matches the session actually run on more days (10.4% against 4.3%), because it always bets on the most likely type.
+- Variety and mix measure realism, not personalisation: sampling the phase-popularity fallback, which ignores the runner, matches them too. On the 12 committed demo runners (43 real weeks, `python -m marathon.plan_eval --demo`, [results](results/marathon/PLAN_DIVERSITY_DEMO.md)), it reached 0.96 distinct types per run and 1% repeats, like the model's sampled weeks (0.93 and 8%), but matched the real session on 1.8% of days and missed the weekly volume by 16.6 km, against 6.1% and 12.0 km for sampled weeks and 14.9% and 8.5 km for greedy. The runner's history shows in the per-day match and the weekly volume. This sample is small: treat the demo figures as indicative.
+
+The full-test-set numbers in the table were produced before per-day seeding and without the baseline; rerun `python -m marathon.plan_eval` with the processed data to refresh them and add the baseline. The model's ranking quality is unchanged and is reported in MARATHON_RESULTS.md.
