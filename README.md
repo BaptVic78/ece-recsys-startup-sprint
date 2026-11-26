@@ -1,10 +1,43 @@
 # StridePlan: a marathon training recommender
 
+[![Tests](https://github.com/BaptVic78/ece-recsys-startup-sprint/actions/workflows/tests.yml/badge.svg)](https://github.com/BaptVic78/ece-recsys-startup-sprint/actions/workflows/tests.yml)
+
 StridePlan recommends a marathon runner's next training sessions. You declare your race date. Every day you plan to run, the app ranks 66 session types for you and turns the best ones into concrete sessions (distance, pace, duration). It also builds the coming week. Log a completed, skipped or missed session and the next recommendations change.
 
 The model is a **context-aware sequential Transformer** after CARCA (Rashed, Elsayed & Schmidt-Thieme, *Context and Attribute-Aware Sequential Recommendation via Cross-Attention*, RecSys 2022). It was trained on 1.2 million sessions of 15,518 runners who completed a 2019 World Marathon Major. The data is the public [BMClab dataset](https://figshare.com/articles/dataset/A_public_dataset_on_long-distance_running_training_in_2019_and_2020/16620238) (CC BY 4.0). The innovation is the **race-calendar context**: the model knows how many weeks remain before your race and how long ago your last race was. On the test period (September to December 2019), the model reaches NDCG@10 0.3225 and Recall@20 0.7953. Most-popular reaches 0.1992 and 0.6240; personal popularity, the strongest baseline, reaches 0.2555 and 0.6636. In the taper weeks, the race context adds +0.037 NDCG@10 over the same model without it, with a paired-bootstrap 95% interval of [+0.035, +0.039]. Moving only the race date makes the recommended distance fall from 14.8 km three weeks out to 7.9 km two days out: the model learned to taper from data.
 
 **Results:** see [results/marathon/MARATHON_RESULTS.md](results/marathon/MARATHON_RESULTS.md). **Method, data and leakage policy:** see [MARATHON_README.md](MARATHON_README.md).
+
+## Quick start (Docker, < 5 minutes)
+
+Install and start [Docker Desktop](https://www.docker.com/products/docker-desktop/), then run:
+
+```text
+git clone https://github.com/BaptVic78/ece-recsys-startup-sprint.git
+cd ece-recsys-startup-sprint
+docker compose up -d --wait
+```
+
+Open http://localhost:8501 and load a demo runner in the sidebar.
+The API docs are at http://localhost:8000/docs.
+
+Compose downloads the prebuilt image from GHCR. If it is unavailable, it builds
+the same image locally. A first source build can take longer, depending on the network.
+The trained model and demo runners are included: no dataset download or training is needed.
+
+If a port is busy, copy `.env.example` to `.env` and change `API_PORT` or
+`FRONTEND_PORT`. For example, `API_PORT=8010` moves the API to
+http://localhost:8010; the frontend still connects to it inside Docker.
+
+- Stop the app: `docker compose down`.
+- Start it again: `docker compose up -d --wait`.
+- See logs: `docker compose logs --tail=50`.
+- Build local changes: `docker compose build api`, then
+  `docker compose up -d --no-build --pull never --wait`.
+
+Done, Skip and Missed are stored in the `interactions` Docker volume.
+Restarting or recreating the containers keeps this data. `docker compose down -v`
+deletes it.
 
 ## Team
 
@@ -16,7 +49,7 @@ The model is a **context-aware sequential Transformer** after CARCA (Rashed, Els
 | GIRAUD Nils | ML Engineer (Ops) | Training and validation loop, model artifacts, predict function |
 | ALACACHE Axel | Systems Engineer | FastAPI backend, Streamlit frontend, deployment |
 
-## Run the system locally (about 5 minutes)
+## Run without Docker (Python alternative)
 
 The trained model (`models/marathon/`) and a demo sample of 12 test-period runners (`demo/`) are in the repository, so running the app needs no dataset download.
 
@@ -97,6 +130,34 @@ python -m unittest discover -s tests
 ```
 
 The tests cover leakage (temporal split, histories strictly before targets, a causal pace reference), the ablation being blind to the race calendar, ranking ties, the baselines, and train/serve consistency. They also run the API end to end with SQLite and check latency, and run the Streamlit page against the committed model (`tests/test_frontend.py`).
+
+## Docker and CI checks
+
+Run both test suites inside the image:
+
+```text
+docker compose run --rm api python -m unittest discover -s tests
+docker compose run --rm api python -m unittest discover -s strideplan_pipeline -p "test_*.py"
+```
+
+With the app running, `python scripts/check_docker.py` checks real recommendations,
+all three interaction types, a container restart, saved data and the next plan.
+It needs only Python's standard library and restarts both services.
+For custom ports, pass `--api http://localhost:8010 --frontend http://localhost:8501`.
+
+GitHub Actions runs the tests on each PR and push to `main`.
+The image workflow also builds and tests the container on PRs. On `main`, it
+publishes the tested image to `ghcr.io/baptvic78/ece-recsys-startup-sprint`,
+with `latest` and commit tags.
+
+After the first publication, a package owner must set the GHCR package visibility
+to **Public** and check that it can be pulled without a login.
+For the CI failure check, temporarily add a failing test on the PR, record the red
+run, remove the test and record the green run. Keep no failing test on `main`.
+
+For Week 3 Q6, a teammate who did not write the setup must time clone-to-first-
+recommendation on a clean machine and attach the timing and a screenshot to the PR.
+Local checks are recorded in [docs/DOCKER_CHECKS.md](docs/DOCKER_CHECKS.md).
 
 ## Repository
 
