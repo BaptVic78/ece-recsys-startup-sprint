@@ -59,7 +59,7 @@ class OnboardingTest(unittest.TestCase):
         profile = self.client.get(f"/users/{user_id}").json()
         self.assertEqual(len(profile["sessions"]), PROFILES[0]["runs"])
         self.assertTrue(all(s["date"] < str(date.today()) for s in profile["sessions"]))
-        self.assertEqual([tab.label for tab in app.tabs], ["Today", "Your week", "History"])
+        self.assertEqual([tab.label for tab in app.tabs], ["Today", "Training plan", "History"])
         labels = [metric.label for metric in app.metric]
         self.assertIn("Forecast finish", labels)
         forecast = [m for m in app.metric if m.label == "Forecast finish"][0].value

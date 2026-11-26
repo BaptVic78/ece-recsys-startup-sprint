@@ -69,7 +69,7 @@ class PlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     user_id: str = Field(min_length=1, max_length=100)
     start_date: Optional[Date] = None
-    days: int = Field(default=7, ge=1, le=28, strict=True)
+    days: int = Field(default=7, ge=1, le=140, strict=True, description="up to 20 weeks, enough to reach the race")
     run_weekdays: list[int] = Field(default=[1, 3, 5, 6], min_length=1, max_length=7,
                                     description="0 = Monday ... 6 = Sunday")
     top_k: int = Field(default=3, ge=1, le=10, strict=True)

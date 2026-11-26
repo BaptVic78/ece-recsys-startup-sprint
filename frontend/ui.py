@@ -33,6 +33,20 @@ STYLE = """
   .st-key-today_card { border-radius: 18px; padding: 1.2rem; border-left: 6px solid var(--brand) !important; }
   .st-key-completion_card { border-radius: 14px; }
   [data-testid="stTabs"] { margin-top: 1rem; }
+  table.cal { width: 100%; border-collapse: separate; border-spacing: 6px; table-layout: fixed; }
+  table.cal th { font-size: .8rem; color: var(--muted); font-weight: 600; text-align: left; padding: 0 .4rem; }
+  table.cal td { vertical-align: top; height: 88px; padding: .45rem .5rem; border-radius: 12px;
+                 background: rgba(127,127,127,.06); border: 1px solid rgba(127,127,127,.15); font-size: .82rem; }
+  table.cal td.run { background: rgba(252,76,2,.10); border-color: rgba(252,76,2,.35); }
+  table.cal td.today { box-shadow: inset 0 0 0 2px var(--brand); }
+  table.cal td.race { background: var(--brand); color: #fff; font-weight: 700; }
+  table.cal td.past { opacity: .35; }
+  table.cal td.wk { background: transparent; border: none; font-weight: 700; vertical-align: middle; }
+  table.cal .d { font-size: .72rem; color: var(--muted); margin-bottom: .15rem; }
+  table.cal td.race .d { color: #fff; }
+  table.cal .s { font-weight: 700; font-size: .95rem; }
+  table.cal .p { color: var(--muted); font-size: .74rem; }
+  table.cal .r { color: var(--brand-dark); font-size: .72rem; margin-top: .15rem; }
 </style>
 """
 

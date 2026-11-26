@@ -8,12 +8,13 @@ import time
 from datetime import date, timedelta
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ui import (call, clock, duration_text, other_options, pace_text, rank_text, session_title,  # noqa: E402
-                setup)
+from ui import (PACE_LABELS, call, clock, duration_text, other_options, pace_text, rank_text,  # noqa: E402
+                session_title, setup)
 
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 MIN_KM, MAX_KM = 1.0, 100.0
@@ -139,11 +140,13 @@ if "user_id" not in st.session_state:
 user = call("GET", f"/users/{st.session_state.user_id}")
 today = st.session_state.today
 recommendation = call("POST", "/recommend", json={"user_id": user["user_id"], "date": str(today), "top_k": 3})
-session = recommendation["planned"]
 runner_label = st.session_state.get("runner_label", user["user_id"])
 race_date = date.fromisoformat(user["race_date"]) if user["race_date"] else None
 
-st.title(f"Hi {runner_label}, here is your training")
+title_column, toggle_column = st.columns([5, 1], vertical_alignment="bottom")
+title_column.title(f"Hi {runner_label}, here is your training")
+staff = toggle_column.toggle("Staff view", key="staff_view",
+                             help="Show the model's ranks, probabilities and alternatives, for the team and the jury.")
 context = today.strftime("%A %d %B %Y")
 if race_date:
     remaining = (race_date - today).days
@@ -174,20 +177,33 @@ kpis[1].metric("Goal", clock(user["goal_minutes"]) if user["goal_minutes"] else 
 kpis[2].metric("Days to race", (race_date - today).days if race_date and race_date >= today else "–")
 kpis[3].metric("Weekly volume", f"{recent_km:.0f} km", help="Average of the last 4 weeks")
 
-today_tab, week_tab, history_tab = st.tabs(["Today", "Your week", "History"])
+# Today's options: the planned session and the next best-ranked ones. The runner may pick any of them.
+planned = recommendation["planned"]
+choices = [planned] + other_options(recommendation)
+choice_key = f"choice-{user['user_id']}-{today}"
+session = next((item for item in choices if item["item"] == st.session_state.get(choice_key)), planned)
+
+
+def ranked(item):
+    return f" · {rank_text(item)} in the model's ranking" if staff else ""
+
+
+today_tab, plan_tab, history_tab = st.tabs(["Today", "Training plan", "History"])
 with today_tab:
     with st.container(border=True, key="today_card"):
-        st.caption(f"{recommendation['phase'].capitalize()} · {rank_text(session)} in the model's ranking")
+        st.caption(f"{recommendation['phase'].capitalize()}{ranked(session)}")
         st.subheader(session_title(session))
+        if session["item"] != planned["item"]:
+            st.caption(f"Your choice for today. Suggested session: {session_title(planned)}.")
         distance, pace, duration = st.columns(3)
         distance.metric("Distance", f"{session['km']:g} km")
         pace.metric("Pace", session["pace"])
         duration.metric("Time", duration_text(session["minutes"]))
         if recommendation["strategy"] == "phase_popularity":
-            st.caption("Based on common runs at this stage. Add at least five recent runs for a personalised ranking.")
+            st.caption("Based on common runs at this stage. Add at least five recent runs for a personalised plan.")
         else:
-            st.caption("Ranked from your recent runs and your race date. Pace bands are relative to your median "
-                       f"pace over the last 28 days ({pace_text(recommendation['reference_pace'])}).")
+            st.caption("Chosen for your recent runs and your race date. Paces are relative to your median pace over "
+                       f"the last 28 days ({pace_text(recommendation['reference_pace'])}).")
         done, missed = st.columns(2)
         if done.button("Log run", type="primary", width="stretch"):
             st.session_state.show_completion = True
@@ -196,7 +212,7 @@ with today_tab:
     if st.session_state.get("show_completion", False):
         with st.container(border=True, key="completion_card"):
             st.subheader("How did your run go?")
-            with st.form(f"complete-{user['user_id']}-{today}"):
+            with st.form(f"complete-{user['user_id']}-{today}-{session['item']}"):
                 distance_input, time_input = st.columns(2)
                 km = distance_input.number_input("Distance (km)", MIN_KM, MAX_KM,
                                                  min(max(float(session["km"]), MIN_KM), MAX_KM))
@@ -207,54 +223,102 @@ with today_tab:
                 if st.form_submit_button("Save run", type="primary"):
                     log("completed", today, rec_id=recommendation["rec_id"], item=session["item"],
                         km=km, minutes=minutes, effort=feelings[feeling])
-    others = other_options(recommendation)
+    others = [item for item in choices if item["item"] != session["item"]]
     if others:
-        st.markdown("**Other options the model ranks highly**")
+        st.markdown("**Other options the model ranks highly**" if staff else "**Prefer something else today?**")
         for column, option in zip(st.columns(len(others)), others):
             with column.container(border=True):
-                st.caption(rank_text(option))
+                if staff:
+                    st.caption(rank_text(option))
                 st.markdown(f"**{session_title(option)}**")
                 st.write(f"{option['pace']} · {duration_text(option['minutes'])}")
-    st.caption("Percentages are the model's probabilities over 66 session types. Today's session is drawn from them, "
-               "so your weeks vary like real training. The Staff page explains every number.")
+                label = "Back to the suggested session" if option["item"] == planned["item"] else "Do this instead"
+                if st.button(label, key=f"pick-{option['item']}", width="stretch"):
+                    st.session_state[choice_key] = option["item"]
+                    st.session_state.show_completion = False
+                    st.rerun()
+    if staff:
+        st.caption("Percentages are the model's probabilities over 66 session types. Today's suggestion is drawn from "
+                   "them, so weeks vary like real training. The Staff page explains every number.")
     if st.button("Skip this session and move to tomorrow"):
         log("skipped", today, rec_id=recommendation["rec_id"], item=session["item"])
 
-with week_tab:
-    st.subheader("Your next seven days")
+with plan_tab:
     run_days = st.multiselect("Days you can run", WEEKDAYS, default=["Tue", "Thu", "Sat", "Sun"])
-    if run_days:
-        plan = call("POST", "/plan", json={"user_id": user["user_id"], "start_date": str(today), "days": 7,
+    if not run_days:
+        st.info("Choose at least one day to see your plan.")
+    else:
+        horizon = (race_date - today).days if race_date and race_date > today else 28
+        horizon = max(1, min(horizon, 140))
+        plan = call("POST", "/plan", json={"user_id": user["user_id"], "start_date": str(today), "days": horizon,
                                           "run_weekdays": [WEEKDAYS.index(day) for day in run_days], "top_k": 3})
-        if plan["days"]:
+        by_date = {day["date"]: day for day in plan["days"]}
+        totals = st.columns(3)
+        totals[0].metric("Runs until race day", len(plan["days"]))
+        totals[1].metric("Planned distance", f"{sum(day['planned']['km'] for day in plan['days']):.0f} km")
+        end = race_date if race_date and race_date > today else today + timedelta(days=horizon)
+        start = today - timedelta(days=today.weekday())
+        totals[2].metric("Weeks", (end - start).days // 7 + 1)
+        rows = ["<table class='cal'><tr>" + "".join(f"<th>{name}</th>" for name in WEEKDAYS) + "<th>Week</th></tr>"]
+        week_start = start
+        while week_start <= end:
+            cells, week_km = [], 0.0
+            for offset in range(7):
+                day = week_start + timedelta(days=offset)
+                planned_day = by_date.get(str(day))
+                classes = ["past"] if day < today else []
+                if day == today:
+                    classes.append("today")
+                body = f"<div class='d'>{day:%d %b}</div>"
+                if race_date and day == race_date:
+                    classes.append("race")
+                    body += "<div class='s'>🏁 Marathon</div>"
+                elif planned_day:
+                    item = planned_day["planned"]
+                    week_km += item["km"]
+                    classes.append("run")
+                    body += (f"<div class='s'>{item['km']:g} km</div><div class='p'>"
+                             f"{PACE_LABELS.get(item['intensity'], item['intensity'])} · {item['pace']}</div>")
+                    if staff:
+                        body += f"<div class='r'>{rank_text(item)}</div>"
+                elif day >= today:
+                    body += "<div class='p'>Rest</div>"
+                cells.append(f"<td class='{' '.join(classes)}'>{body}</td>")
+            rows.append("<tr>" + "".join(cells) + f"<td class='wk'>{week_km:.0f} km</td></tr>")
+            week_start += timedelta(days=7)
+        st.markdown("".join(rows) + "</table>", unsafe_allow_html=True)
+        st.caption("Your plan until race day. It is rebuilt every time you log a run, a skip or a missed day.")
+        with st.expander("List view"):
             rows = []
             for day in plan["days"]:
-                planned = day["planned"]
-                rows.append({"Day": pd.Timestamp(day["date"]).strftime("%a %d %b"),
-                             "Session": session_title(planned), "Pace": planned["pace"],
-                             "Time": duration_text(planned["minutes"]), "Model rank": rank_text(planned),
-                             "Top-ranked options": " / ".join(session_title(item) for item in other_options(day))})
-            st.metric("Planned this week", f"{sum(day['planned']['km'] for day in plan['days']):.0f} km "
-                                           f"in {len(plan['days'])} runs")
+                item = day["planned"]
+                row = {"Day": pd.Timestamp(day["date"]).strftime("%a %d %b"), "Session": session_title(item),
+                       "Pace": item["pace"], "Time": duration_text(item["minutes"])}
+                if staff:
+                    row["Model rank"] = rank_text(item)
+                    row["Top-ranked options"] = " / ".join(session_title(option) for option in other_options(day))
+                rows.append(row)
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-            st.caption("Each session is drawn from the model's probabilities, then assumed done before the next day. "
-                       "The plan stays the same while you follow it; log what happens to update it.")
-        else:
-            st.info("There are no training days in this period before your race.")
-    else:
-        st.info("Choose at least one day to see your week.")
+        if staff:
+            st.caption("Each session is drawn from the model's probabilities, then assumed done before the next day.")
 
 with history_tab:
-    st.subheader("Your recent running")
-    if history.empty:
+    st.subheader("Your runs over the last 8 weeks")
+    past = history[history["date"] < pd.Timestamp(today)] if not history.empty else history
+    if past.empty:
         st.info("Your completed runs will appear here.")
     else:
-        weekly = (history[history["date"] < pd.Timestamp(today)].set_index("date")["km"]
-                  .resample("W-SUN").sum().tail(12))
-        st.caption("Weekly distance (km)")
-        st.bar_chart(weekly, height=230, color="#FC4C02")
+        recent = past[past["date"] >= pd.Timestamp(today) - pd.Timedelta(weeks=8)].sort_values("date").copy()
+        recent["Day"] = recent["date"].dt.strftime("%a %d %b")
+        recent["Pace"] = (recent["minutes"] / recent["km"]).map(pace_text)
+        chart = alt.Chart(recent[["Day", "km", "Pace"]]).mark_bar(
+            color="#FC4C02", cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+            x=alt.X("Day:N", sort=list(recent["Day"]), title=None, axis=alt.Axis(labelAngle=-60)),
+            y=alt.Y("km:Q", title="km"), tooltip=["Day", "km", "Pace"])
+        st.altair_chart(chart, width="stretch")
         with st.expander("View runs"):
-            table = history[["date", "km", "minutes"]].sort_values("date", ascending=False).copy()
+            table = past[["date", "km", "minutes"]].sort_values("date", ascending=False).copy()
+            table["date"] = table["date"].dt.strftime("%a %d %b %Y")
             table["pace"] = (table["minutes"] / table["km"]).map(pace_text)
             st.dataframe(table, hide_index=True, width="stretch")
     with st.expander("Recorded feedback"):
