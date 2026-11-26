@@ -79,6 +79,12 @@ class Store:
                 (user_id, race_date, goal_minutes, time.time()))
         return self.user(user_id)
 
+    def reset_user(self, user_id):
+        """Delete a user and everything logged for them."""
+        with self.lock, self.connection:
+            for table in ("interactions", "recommendations", "sessions", "users"):
+                self.connection.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
+
     def user(self, user_id):
         row = self.connection.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
         return dict(row) if row else None
