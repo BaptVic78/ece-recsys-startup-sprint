@@ -17,20 +17,14 @@ RUN_NAMES = {"much faster": "Fast-paced run", "faster": "Faster run", "slightly 
 st.set_page_config(page_title="StridePlan", page_icon="🏃", layout="wide")
 st.markdown("""
 <style>
-  .stApp { background: #f6f7f4; color: #1d3028; }
-  h1, h2, h3, [data-testid="stMetricValue"], [data-testid="stMetricLabel"] { color: #1d3028; }
   .stMainBlockContainer { max-width: 1120px; padding-top: 2.5rem; }
-  [data-testid="stSidebar"] { background: #eef1eb; border-right: 1px solid #e1e6de; }
   h1 { font-size: 2.65rem !important; letter-spacing: -.055em; font-weight: 650 !important; }
   h2, h3 { letter-spacing: -.025em; }
   [data-testid="stMetricValue"] { font-size: 2.1rem; font-weight: 600; }
-  .st-key-today_card { background: white; border-radius: 18px; padding: 1.2rem; }
-  .st-key-completion_card { background: white; border-radius: 14px; }
-  button[kind="primary"] { background: #22664e; border-color: #22664e; color: white; }
+  .st-key-today_card { border-radius: 18px; padding: 1.2rem; }
+  .st-key-completion_card { border-radius: 14px; }
   button { border-radius: 9px !important; }
   [data-testid="stTabs"] { margin-top: 1.1rem; }
-  [data-baseweb="tab-highlight"] { background-color: #22664e; }
-  [role="tab"][aria-selected="true"] { color: #22664e; }
 </style>
 """, unsafe_allow_html=True)
 
