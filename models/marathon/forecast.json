@@ -1,0 +1,42 @@
+{
+  "coefficients": [
+    -0.44512141548132733,
+    0.7783278426865546,
+    0.35707848931373876,
+    -0.2786449146643759,
+    0.5815459333230374,
+    -0.08341666799865544
+  ],
+  "residual_quantiles": {
+    "p10": -22.858252611306305,
+    "p90": 25.979765427256122
+  },
+  "features": [
+    "riegel_minutes",
+    "median_pace_x_marathon",
+    "km_per_week",
+    "runs_per_week",
+    "longest_km"
+  ],
+  "window_days": 84,
+  "horizon_days": 21,
+  "train": {
+    "races": [
+      "BOSTON 2019",
+      "LONDON 2019"
+    ],
+    "cases": 6455
+  },
+  "test": {
+    "races": [
+      "BERLIN 2019",
+      "CHICAGO 2019",
+      "NEW YORK 2019"
+    ],
+    "cases": 7944,
+    "mae_minutes": 19.851408473916532,
+    "mae_riegel_minutes": 22.53155706332559,
+    "mae_mean_minutes": 40.91752322089899,
+    "interval_coverage": 0.6902064451158106
+  }
+}
