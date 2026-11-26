@@ -13,6 +13,13 @@ import streamlit as st
 
 API = os.environ.get("MARATHON_API", "http://localhost:8000")
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+# Same bounds as the API's session contract (marathon/api.py), so any valid recommendation fits.
+MIN_KM, MAX_KM = 1.0, 100.0
+MIN_MINUTES, MAX_MINUTES = 1.0, 900.0
+
+
+def clamp(value, low, high):
+    return min(max(float(value), low), high)
 
 st.set_page_config(page_title="StridePlan", page_icon="🏃", layout="wide")
 
@@ -101,8 +108,8 @@ st.dataframe(table, hide_index=True, width="stretch")
 top = recommendation["recommendations"][0]
 st.markdown(f"**Log what you did on {today:%d %B}**")
 c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
-km = c1.number_input("km", 1.0, 60.0, float(top["km"]))
-minutes = c2.number_input("minutes", 5.0, 400.0, float(top["minutes"]))
+km = c1.number_input("km", MIN_KM, MAX_KM, clamp(top["km"], MIN_KM, MAX_KM))
+minutes = c2.number_input("minutes", MIN_MINUTES, MAX_MINUTES, clamp(top["minutes"], MIN_MINUTES, MAX_MINUTES))
 effort = c3.selectbox("Effort", ["ok", "too_easy", "too_hard"])
 with c4:
     done, skipped, missed = st.columns(3)

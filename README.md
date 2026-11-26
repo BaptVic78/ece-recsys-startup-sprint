@@ -96,7 +96,7 @@ python -m marathon.demo              # demo sample
 python -m unittest discover -s tests
 ```
 
-The tests cover leakage (temporal split, histories strictly before targets, a causal pace reference), the ablation being blind to the race calendar, ranking ties, the baselines, and train/serve consistency. They also run the API end to end with SQLite and check latency.
+The tests cover leakage (temporal split, histories strictly before targets, a causal pace reference), the ablation being blind to the race calendar, ranking ties, the baselines, and train/serve consistency. They also run the API end to end with SQLite and check latency, and run the Streamlit page against the committed model (`tests/test_frontend.py`).
 
 ## Repository
 
