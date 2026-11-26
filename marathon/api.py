@@ -21,13 +21,16 @@ from marathon.store import EFFORTS, INTERACTION_TYPES, InteractionError, Store
 MODEL_DIR = Path(os.environ.get("MARATHON_MODEL_DIR", "models/marathon"))
 DB_PATH = os.environ.get("MARATHON_DB", "artifacts/marathon/interactions.sqlite3")
 DEMO_DIR = Path(os.environ.get("MARATHON_DEMO_DIR", "demo"))
+# Input contract for one session; the frontend uses the same bounds.
+MAX_SESSION_KM = 100
+MAX_SESSION_MINUTES = 900
 
 
 class Session(BaseModel):
     model_config = ConfigDict(extra="forbid")
     date: Date
-    km: float = Field(gt=0, le=100, allow_inf_nan=False)
-    minutes: float = Field(gt=0, le=900, allow_inf_nan=False)
+    km: float = Field(gt=0, le=MAX_SESSION_KM, allow_inf_nan=False)
+    minutes: float = Field(gt=0, le=MAX_SESSION_MINUTES, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def check_quality(self):
@@ -67,8 +70,8 @@ class Interaction(BaseModel):
     date: Date
     rec_id: Optional[str] = None
     item: Optional[int] = Field(default=None, ge=1, le=NUM_ITEMS)
-    km: Optional[float] = Field(default=None, gt=0, le=100, allow_inf_nan=False)
-    minutes: Optional[float] = Field(default=None, gt=0, le=900, allow_inf_nan=False)
+    km: Optional[float] = Field(default=None, gt=0, le=MAX_SESSION_KM, allow_inf_nan=False)
+    minutes: Optional[float] = Field(default=None, gt=0, le=MAX_SESSION_MINUTES, allow_inf_nan=False)
     effort: Optional[Literal[EFFORTS]] = None
 
     @model_validator(mode="after")
