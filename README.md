@@ -8,13 +8,13 @@ The model is a **context-aware sequential Transformer** after CARCA (Rashed, Els
 
 ## Team
 
-| Member | Role |
-| --- | --- |
-| _to fill_ | Project Lead (evaluation harness, model-specific preprocessing) |
-| _to fill_ | Data Engineer (BMClab pipeline, SQLite store, `/log_interaction`) |
-| _to fill_ | Lead ML Engineer (CARCA-style model) |
-| _to fill_ | ML Engineer (training loop, checkpoints, predict functions) |
-| _to fill_ | Systems Engineer (FastAPI backend, Streamlit frontend, deployment) |
+| Name | Role | Responsibility |
+| --- | --- | --- |
+| ROULEAU Victor | Project Lead | Plan, schedule, Git repository; owns the evaluation harness and model-specific preprocessing |
+| LE POEZELLER Thaddée | Data Engineer | Data pipeline and storage; `/log_interaction` endpoint and database |
+| SOUBAGNE Thomas | Lead ML Engineer | Core model implementation |
+| GIRAUD Nils | ML Engineer (Ops) | Training and validation loop, model artifacts, predict function |
+| ALACACHE Axel | Systems Engineer | FastAPI backend, Streamlit frontend, deployment |
 
 ## Run the system locally (about 5 minutes)
 
