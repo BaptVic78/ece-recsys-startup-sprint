@@ -1,8 +1,4 @@
-"""StridePlan Streamlit frontend. Every number on this page comes from the FastAPI backend.
-
-Run the API first (`python -m uvicorn marathon.api:app --port 8000`), then
-`python -m streamlit run frontend/app.py` and open http://localhost:8501.
-"""
+"""StridePlan demo interface. All recommendations and interactions use the API."""
 
 import os
 from datetime import date, timedelta
@@ -13,125 +9,232 @@ import streamlit as st
 
 API = os.environ.get("MARATHON_API", "http://localhost:8000")
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-# Same bounds as the API's session contract (marathon/api.py), so any valid recommendation fits.
 MIN_KM, MAX_KM = 1.0, 100.0
 MIN_MINUTES, MAX_MINUTES = 1.0, 900.0
-
-
-def clamp(value, low, high):
-    return min(max(float(value), low), high)
+RUN_NAMES = {"much faster": "Fast-paced run", "faster": "Faster run", "slightly faster": "Brisk run",
+             "usual": "Steady run", "slightly easier": "Relaxed run", "easier": "Easy-paced run"}
 
 st.set_page_config(page_title="StridePlan", page_icon="🏃", layout="wide")
+st.markdown("""
+<style>
+  .stApp { background: #f6f7f4; color: #1d3028; }
+  h1, h2, h3, [data-testid="stMetricValue"], [data-testid="stMetricLabel"] { color: #1d3028; }
+  .stMainBlockContainer { max-width: 1120px; padding-top: 2.5rem; }
+  [data-testid="stSidebar"] { background: #eef1eb; border-right: 1px solid #e1e6de; }
+  h1 { font-size: 2.65rem !important; letter-spacing: -.055em; font-weight: 650 !important; }
+  h2, h3 { letter-spacing: -.025em; }
+  [data-testid="stMetricValue"] { font-size: 2.1rem; font-weight: 600; }
+  .st-key-today_card { background: white; border-radius: 18px; padding: 1.2rem; }
+  .st-key-completion_card { background: white; border-radius: 14px; }
+  button[kind="primary"] { background: #22664e; border-color: #22664e; color: white; }
+  button { border-radius: 9px !important; }
+  [data-testid="stTabs"] { margin-top: 1.1rem; }
+  [data-baseweb="tab-highlight"] { background-color: #22664e; }
+  [role="tab"][aria-selected="true"] { color: #22664e; }
+</style>
+""", unsafe_allow_html=True)
 
 
 def call(method, path, **kwargs):
     try:
         response = requests.request(method, f"{API}{path}", timeout=10, **kwargs)
-    except requests.ConnectionError:
-        st.error(f"The API is not reachable at {API}. Start it with `python -m uvicorn marathon.api:app --port 8000`.")
+    except requests.RequestException:
+        st.error("The recommendation service is unavailable. Please try again.")
+        with st.expander("Connection help"):
+            st.write(f"Expected API: {API}")
+            st.code("python -m uvicorn marathon.api:app --port 8000")
         st.stop()
     if response.status_code >= 400:
-        st.error(f"{path}: {response.status_code} {response.text}")
+        try:
+            detail = response.json().get("detail", "Please check your entries.")
+        except ValueError:
+            detail = "Please try again."
+        if isinstance(detail, list):
+            detail = " ".join(error.get("msg", "Invalid entry.").removeprefix("Value error, ") for error in detail)
+        st.error(str(detail))
         st.stop()
     return response.json()
 
 
+def duration_text(minutes):
+    hours, remainder = divmod(round(minutes), 60)
+    if hours == 0:
+        return f"{remainder} min"
+    return f"{hours} h {remainder:02d}" if remainder else f"{hours} h"
+
+
+def run_name(item):
+    return RUN_NAMES.get(item.get("intensity"), item["title"])
+
+
+def activate_runner(user_id, today, label):
+    st.session_state.user_id = user_id
+    st.session_state.today = today
+    st.session_state.runner_label = label
+    st.session_state.show_completion = False
+    st.session_state.pop("notice", None)
+
+
 def log(kind, day, **fields):
-    call("POST", "/log_interaction", json={"user_id": st.session_state.user_id, "type": kind, "date": str(day), **fields})
+    call("POST", "/log_interaction", json={"user_id": st.session_state.user_id, "type": kind,
+                                           "date": str(day), **fields})
     st.session_state.today = day + timedelta(days=1)
+    st.session_state.show_completion = False
+    st.session_state.notice = "Run saved. Here is your next day." if kind == "completed" else "Day saved. Your plan is updated."
     st.rerun()
 
 
-st.title("StridePlan: your marathon training, learned from 15,000 real preparations")
-st.caption("Context-aware sequential recommender (CARCA-style Transformer) trained on the public BMClab "
-           "dataset of 2019 marathon runners. It ranks 66 session types for the day you plan to run.")
-
 with st.sidebar:
-    st.header("Runner")
-    health = call("GET", "/health")
-    st.caption(f"API {API} · model {health['model']}")
-    mode = st.radio("Profile", ["Demo runner (test period)", "My own profile"])
-    if mode.startswith("Demo"):
+    st.title("StridePlan")
+    st.caption("Marathon training")
+    mode = st.radio("Runner", ["Demo runner", "My profile"], label_visibility="collapsed")
+    if mode == "Demo runner":
         runners = call("GET", "/demo/runners")
-        labels = {f"Runner {r['runner']} · {r['race'].title()}": r for r in runners}
-        choice = st.selectbox("Runner from the autumn 2019 majors", list(labels))
-        if st.button("Load runner", type="primary"):
-            loaded = call("POST", f"/demo/{labels[choice]['runner']}/load")
-            st.session_state.user_id = loaded["user_id"]
-            st.session_state.today = date.fromisoformat(loaded["today"])
+        if not runners:
+            st.info("No demo runners are available. You can add your own profile.")
+        else:
+            labels = {f"{runner['race'].title()} · Runner {index + 1}": runner for index, runner in enumerate(runners)}
+            choice = st.selectbox("Choose a runner", list(labels))
+            if st.button("Load runner", type="primary", width="stretch"):
+                loaded = call("POST", f"/demo/{labels[choice]['runner']}/load")
+                activate_runner(loaded["user_id"], date.fromisoformat(loaded["today"]), loaded["race"].title())
     else:
-        user_id = st.text_input("User name", "lea")
-        race_date = st.date_input("Marathon date", date.today() + timedelta(weeks=12))
-        goal = st.number_input("Goal time (minutes, shown as a pace only)", 150, 420, 225)
-        st.caption("Enter your recent runs (at least 5 for personalised recommendations).")
-        default_runs = pd.DataFrame({"date": [date.today() - timedelta(days=d) for d in (12, 10, 8, 5, 3, 1)],
-                                     "km": [10.0, 8.0, 16.0, 10.0, 12.0, 8.0],
-                                     "minutes": [58.0, 46.0, 98.0, 56.0, 70.0, 47.0]})
-        runs = st.data_editor(default_runs, num_rows="dynamic")
-        if st.button("Save profile", type="primary"):
-            sessions = [{"date": str(pd.Timestamp(r.date).date()), "km": float(r.km), "minutes": float(r.minutes)}
-                        for r in runs.itertuples() if r.km > 0 and r.minutes > 0]
-            call("POST", "/users", json={"user_id": user_id, "race_date": str(race_date), "goal_minutes": float(goal),
-                                         "sessions": sessions})
-            st.session_state.user_id = user_id
-            st.session_state.today = date.today()
+        add_goal = st.checkbox("Add a target finish time")
+        with st.form("profile"):
+            user_id = st.text_input("Name", "lea")
+            race_date = st.date_input("Marathon date", date.today() + timedelta(weeks=12))
+            goal = st.number_input("Target finish (minutes)", 121, 479, 225) if add_goal else None
+            if add_goal:
+                st.caption("Shown for reference. Training paces follow your recent runs.")
+            st.caption("Your recent runs")
+            default_runs = pd.DataFrame({"date": [date.today() - timedelta(days=d) for d in (12, 10, 8, 5, 3, 1)],
+                                         "km": [10., 8., 16., 10., 12., 8.],
+                                         "minutes": [58., 46., 98., 56., 70., 47.]})
+            runs = st.data_editor(default_runs, num_rows="dynamic", hide_index=True)
+            submitted = st.form_submit_button("Save profile", type="primary", width="stretch")
+        if submitted:
+            sessions = [{"date": str(pd.Timestamp(row.date).date()), "km": float(row.km), "minutes": float(row.minutes)}
+                        for row in runs.itertuples() if pd.notna(row.km) and pd.notna(row.minutes)
+                        and row.km > 0 and row.minutes > 0]
+            call("POST", "/users", json={"user_id": user_id, "race_date": str(race_date),
+                                          "goal_minutes": goal, "sessions": sessions})
+            activate_runner(user_id, date.today(), user_id)
+    with st.expander("About the demo"):
+        st.write("Demo runners use recorded marathon histories from 2019. Loading a runner restarts their demo.")
+        st.caption("Session suggestions come from the trained model. A target finish time is displayed for reference only.")
 
 if "user_id" not in st.session_state:
-    st.info("Load a demo runner or save your profile in the sidebar.")
+    st.title("Your next run, in focus.")
+    st.write("A session that fits your recent running and the time left before your marathon.")
+    with st.container(border=True):
+        st.subheader("Start with a runner")
+        st.write("Choose a demo runner in the sidebar and select **Load runner**. You can also add your own profile.")
     st.stop()
 
 user = call("GET", f"/users/{st.session_state.user_id}")
 today = st.session_state.today
-recommendation = call("POST", "/recommend", json={"user_id": user["user_id"], "date": str(today), "top_k": 10})
+recommendation = call("POST", "/recommend", json={"user_id": user["user_id"], "date": str(today), "top_k": 3})
+st.title("Your next run")
+runner_label = st.session_state.get("runner_label", user["user_id"])
+race_date = date.fromisoformat(user["race_date"]) if user["race_date"] else None
+context = f"{runner_label} · {today:%A %d %B %Y}"
+if race_date:
+    remaining = (race_date - today).days
+    context += f" · {remaining} days to race" if remaining >= 0 else " · Race completed"
+st.caption(context)
+notice = st.session_state.pop("notice", None)
+if notice:
+    st.success(notice)
 
-left, middle, right = st.columns(3)
-left.metric("Today", today.strftime("%a %d %b %Y"))
-middle.metric("Preparation phase", recommendation["phase"])
-right.metric("Logged sessions", len(user["sessions"]))
-if user["goal_pace"]:
-    st.caption(f"Goal marathon pace: {user['goal_pace']}. Paces below are relative to your own recent median pace "
-               f"({recommendation['reference_pace']:.2f} min/km).")
+today_tab, week_tab, history_tab = st.tabs(["Today", "Your week", "History"])
+with today_tab:
+    if not recommendation["recommendations"]:
+        st.info("There are no session suggestions for this day.")
+    else:
+        top = recommendation["recommendations"][0]
+        with st.container(border=True, key="today_card"):
+            st.caption(recommendation["phase"].capitalize())
+            st.subheader(run_name(top))
+            distance, pace, duration = st.columns(3)
+            distance.metric("Distance", f"{top['km']:g} km")
+            pace.metric("Pace", top["pace"])
+            duration.metric("Time", duration_text(top["minutes"]))
+            if recommendation["strategy"] == "phase_popularity":
+                st.caption("Based on common runs at this stage. Add at least five recent runs for a personalised ranking.")
+            else:
+                st.caption("Picked from your recent runs and your race date.")
+            done, missed = st.columns(2)
+            if done.button("Log run", type="primary", width="stretch"):
+                st.session_state.show_completion = True
+            if missed.button("Missed today", width="stretch"):
+                log("missed", today)
+        if st.session_state.get("show_completion", False):
+            with st.container(border=True, key="completion_card"):
+                st.subheader("How did your run go?")
+                with st.form(f"complete-{user['user_id']}-{today}"):
+                    distance_input, time_input = st.columns(2)
+                    km = distance_input.number_input("Distance (km)", MIN_KM, MAX_KM,
+                                                     min(max(float(top["km"]), MIN_KM), MAX_KM))
+                    minutes = time_input.number_input("Time (min)", MIN_MINUTES, MAX_MINUTES,
+                                                      min(max(float(top["minutes"]), MIN_MINUTES), MAX_MINUTES))
+                    feelings = {"Felt right": "ok", "Too easy": "too_easy", "Too hard": "too_hard"}
+                    feeling = st.selectbox("Effort", list(feelings))
+                    if st.form_submit_button("Save run", type="primary"):
+                        log("completed", today, rec_id=recommendation["rec_id"], item=top["item"],
+                            km=km, minutes=minutes, effort=feelings[feeling])
+        with st.expander("Other suggestions"):
+            for option in recommendation["recommendations"][1:]:
+                st.write(f"**{run_name(option)}** · {option['km']:g} km · {option['pace']} · {duration_text(option['minutes'])}")
+            if st.button("Skip this suggestion and move to tomorrow"):
+                log("skipped", today, rec_id=recommendation["rec_id"], item=top["item"])
 
-history = pd.DataFrame(user["sessions"])
-if not history.empty:
-    history["date"] = pd.to_datetime(history["date"])
-    recent = history[history["date"] >= pd.Timestamp(today) - pd.Timedelta(weeks=8)]
-    st.subheader("Last 8 weeks")
-    st.bar_chart(recent.set_index("date")["km"], height=180)
+with week_tab:
+    st.subheader("The next seven days")
+    run_days = st.multiselect("Days you can run", WEEKDAYS, default=["Tue", "Thu", "Sat", "Sun"])
+    if run_days:
+        plan = call("POST", "/plan", json={"user_id": user["user_id"], "start_date": str(today), "days": 7,
+                                          "run_weekdays": [WEEKDAYS.index(day) for day in run_days], "top_k": 3})
+        if plan["days"]:
+            rows = []
+            for day in plan["days"]:
+                session = day["recommendations"][0]
+                rows.append({"Day": pd.Timestamp(day["date"]).strftime("%a %d %b"),
+                             "Run": run_name(session), "Distance": f"{session['km']:g} km",
+                             "Pace": session["pace"], "Time": duration_text(session["minutes"])})
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+            st.caption("The week assumes you complete each suggested run. Log what happens to update the next plan.")
+        else:
+            st.info("There are no training days in this period before your race.")
+    else:
+        st.info("Choose at least one day to see your week.")
 
-st.subheader(f"Recommended sessions for {today:%A %d %B}")
-st.caption(f"Strategy: {recommendation['strategy']} · {recommendation['history_sessions']} sessions of history · "
-           f"answered in {recommendation['latency_ms']} ms")
-table = pd.DataFrame(recommendation["recommendations"])[["rank", "title", "distance_range", "pace", "minutes", "score"]]
-st.dataframe(table, hide_index=True, width="stretch")
+with history_tab:
+    st.subheader("Your recent running")
+    history = pd.DataFrame(user["sessions"])
+    if history.empty:
+        st.info("Your completed runs will appear here.")
+    else:
+        history["date"] = pd.to_datetime(history["date"])
+        recent = history[(history["date"] >= pd.Timestamp(today) - pd.Timedelta(weeks=8))
+                         & (history["date"] < pd.Timestamp(today))]
+        st.bar_chart(recent.set_index("date")["km"], height=220)
+        with st.expander("View runs"):
+            st.dataframe(history[["date", "km", "minutes"]].sort_values("date", ascending=False),
+                         hide_index=True, width="stretch")
+    with st.expander("Recorded feedback"):
+        if user["interactions"]:
+            st.dataframe(pd.DataFrame(user["interactions"])[["date", "type", "effort"]], hide_index=True, width="stretch")
+        else:
+            st.caption("No feedback yet.")
 
-top = recommendation["recommendations"][0]
-st.markdown(f"**Log what you did on {today:%d %B}**")
-c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
-km = c1.number_input("km", MIN_KM, MAX_KM, clamp(top["km"], MIN_KM, MAX_KM))
-minutes = c2.number_input("minutes", MIN_MINUTES, MAX_MINUTES, clamp(top["minutes"], MIN_MINUTES, MAX_MINUTES))
-effort = c3.selectbox("Effort", ["ok", "too_easy", "too_hard"])
-with c4:
-    done, skipped, missed = st.columns(3)
-    if done.button("Done ✅"):
-        log("completed", today, rec_id=recommendation["rec_id"], item=top["item"], km=km, minutes=minutes, effort=effort)
-    if skipped.button("Skip top pick"):
-        log("skipped", today, rec_id=recommendation["rec_id"], item=top["item"])
-    if missed.button("Missed the day ❌"):
-        log("missed", today)
-
-st.subheader("Plan for the next 7 days")
-run_days = st.multiselect("Days you can run", WEEKDAYS, default=["Tue", "Thu", "Sat", "Sun"])
-if run_days:
-    plan = call("POST", "/plan", json={"user_id": user["user_id"], "start_date": str(today), "days": 7,
-                                       "run_weekdays": [WEEKDAYS.index(day) for day in run_days], "top_k": 3})
-    rows = [{"day": pd.Timestamp(day["date"]).strftime("%a %d %b"), "phase": day["phase"],
-             "session": day["recommendations"][0]["title"], "pace": day["recommendations"][0]["pace"],
-             "minutes": day["recommendations"][0]["minutes"],
-             "alternatives": " · ".join(item["title"] for item in day["recommendations"][1:])} for day in plan["days"]]
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-    st.caption("The plan is rolled forward with the model: each day's top session is assumed done before ranking the "
-               "next one. Logging a missed day or a different session changes the next plan.")
-
-with st.expander("Interaction log (stored in SQLite through /log_interaction)"):
-    st.dataframe(pd.DataFrame(user["interactions"]), hide_index=True, width="stretch")
+with st.sidebar:
+    with st.expander("Profile details"):
+        st.write(f"Runner: {runner_label}")
+        st.write(f"Race date: {race_date:%d %B %Y}" if race_date else "No race date set")
+        if user["goal_pace"]:
+            st.write(f"Target race pace: {user['goal_pace']} (for reference)")
+    with st.expander("Technical details"):
+        st.caption(f"Model: {recommendation['model']}")
+        st.caption(f"Strategy: {recommendation['strategy']}")
+        st.caption(f"History used: {recommendation['history_sessions']} sessions")
+        st.caption(f"Response: {recommendation['latency_ms']} ms")
