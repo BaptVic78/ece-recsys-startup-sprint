@@ -79,6 +79,25 @@ class ModelTest(unittest.TestCase):
             self.assertTrue(torch.isfinite(loss))
 
 
+class ReportTest(unittest.TestCase):
+    def test_race_date_sweep_counts_each_runner_once_and_ablation_is_flat(self):
+        from marathon.report import one_target_per_runner, race_date_sweep
+        store = SessionStore(synthetic_sessions())
+        targets = store.targets("test", min_history=2)
+        chosen = one_target_per_runner(store, targets, np.random.default_rng(0), sample=10)
+        athletes = store.sessions["athlete"].to_numpy()[chosen]
+        self.assertEqual(len(chosen), 2)
+        self.assertEqual(len(set(athletes)), 2)
+        torch.manual_seed(0)
+        models = {name: ContextCrossAttentionRecommender(NUM_ITEMS, item_attributes(), 32, dim=16,
+                                                         use_race_context=use).eval()
+                  for name, use in (("ours", True), ("ablation", False))}
+        sweep = race_date_sweep(models, store, targets, np.random.default_rng(0), sample=10)
+        self.assertEqual(sweep["runners"], 2)
+        self.assertEqual(len(set(sweep["ablation"].values())), 1)
+        self.assertGreater(len(set(sweep["ours"].values())), 1)
+
+
 class EvaluationTest(unittest.TestCase):
     def test_ties_never_favour_the_label(self):
         scores = np.array([[1.0, 1.0, 1.0], [0.0, 2.0, 1.0]])

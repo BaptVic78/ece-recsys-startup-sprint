@@ -60,7 +60,7 @@ Coverage@10 is the share of the 66 types that appear in at least one top-10 list
 
 ## Innovation check: moving only the race date
 
-2,000 test runners preparing a race (2 to 20 weeks out). Their histories are kept; only the declared race date moves. Expected distance of the recommended session: 14.2 km with the race 70 days away, 13.4 km at 14 days, 7.9 km at 2 days. The ablation stays at 13.7 km whatever the date, as it must. The model learned to taper from data; no rule encodes it.
+2,000 distinct test runners preparing a race (2 to 20 weeks out), one session each. Their histories are kept; only the declared race date moves. Expected distance of the recommended session: 14.2 km with the race 70 days away, 13.5 km at 14 days, 7.7 km at 2 days. The ablation stays at 13.6 km whatever the date, as it must. The model learned to taper from data; no rule encodes it.
 
 ![Race-date sweep](race_date_sweep.png)
 
