@@ -48,7 +48,7 @@ class FrontendTest(unittest.TestCase):
         [button for button in app.button if button.label == "Log run"][0].click().run()
         self.assertFalse(app.exception, app.exception)
         minutes = [widget for widget in app.number_input if widget.label == "Time (min)"][0]
-        self.assertEqual(minutes.value, float(top["recommendations"][0]["minutes"]))
+        self.assertEqual(minutes.value, float(top["planned"]["minutes"]))
         self.assertGreater(minutes.value, 400)  # above the old hard-coded maximum
         self.assertEqual(minutes.proto.max, MAX_SESSION_MINUTES)
         self.assertEqual([w for w in app.number_input if w.label == "Distance (km)"][0].proto.max, MAX_SESSION_KM)
@@ -79,6 +79,63 @@ class FrontendTest(unittest.TestCase):
         self.assertEqual(profile["sessions"][-1]["minutes"], 48.0)
         self.assertEqual(app.session_state["today"], today + timedelta(days=1))
         self.assertFalse(app.number_input)
+
+    def test_today_card_matches_the_week_row_for_the_same_day(self):
+        for runner in (4302, 4399, 18512):
+            with self.subTest(runner=runner):
+                loaded = self.client.post(f"/demo/{runner}/load").json()
+                today = date.fromisoformat(loaded["today"])
+                app = self.page(loaded["user_id"], today)
+                self.assertFalse(app.exception, app.exception)
+                week = app.dataframe[0].value
+                self.assertEqual(week.iloc[0]["Day"], today.strftime("%a %d %b"))  # demo days are Sundays
+                card = [element.value for element in app.subheader if " km · " in element.value][0]
+                self.assertEqual(week.iloc[0]["Session"], card)
+
+    def test_titles_name_distance_and_pace_and_options_are_visible(self):
+        loaded = self.client.post("/demo/4302/load").json()
+        today = date.fromisoformat(loaded["today"])
+        day = self.client.post("/recommend", json={"user_id": loaded["user_id"], "date": str(today),
+                                                   "top_k": 3}).json()
+        app = self.page(loaded["user_id"], today)
+        self.assertNotIn("Other suggestions", [expander.label for expander in app.expander])
+        markdown = [element.value for element in app.markdown]
+        self.assertIn("**Other options the model ranks highly**", markdown)
+        card = [element.value for element in app.subheader if " km · " in element.value][0]
+        options = [value.strip("*") for value in markdown if value.startswith("**") and " km · " in value]
+        others = [item for item in day["recommendations"] if item["item"] != day["planned"]["item"]][:2]
+        self.assertEqual(len(options), len(others))
+        self.assertEqual(len({card, *options}), 1 + len(others))  # different types, different titles
+        self.assertTrue(card.startswith(f"{day['planned']['km']:g} km"))
+        week = app.dataframe[0].value
+        self.assertEqual(list(week.columns), ["Day", "Session", "Pace", "Time", "Model rank", "Top-ranked options"])
+        self.assertTrue(all(cell.startswith("#") for cell in week["Model rank"]))
+
+    def test_today_card_says_which_past_runs_drove_the_session(self):
+        loaded = self.client.post("/demo/4302/load").json()
+        today = date.fromisoformat(loaded["today"])
+        planned = self.client.post("/recommend", json={"user_id": loaded["user_id"], "date": str(today),
+                                                       "top_k": 3}).json()["planned"]
+        app = self.page(loaded["user_id"], today)
+        self.assertFalse(app.exception, app.exception)
+        lines = [element.value for element in app.markdown if element.value.startswith("Because of: ")]
+        self.assertEqual(len(lines), 1)
+        expected = ", ".join(f"{date.fromisoformat(run['date']):%a %d %b} {run['km']:g} km"
+                             for run in planned["because_of"])
+        self.assertEqual(lines[0], "Because of: " + expected)
+
+    def test_skip_logs_the_session_shown_and_moves_to_next_day(self):
+        loaded = self.client.post("/demo/4302/load").json()
+        today = date.fromisoformat(loaded["today"])
+        shown = self.client.post("/recommend", json={"user_id": loaded["user_id"], "date": str(today),
+                                                     "top_k": 3}).json()["planned"]
+        app = self.page(loaded["user_id"], today)
+        [button for button in app.button if button.label.startswith("Skip this session")][0].click().run()
+        self.assertFalse(app.exception, app.exception)
+        interactions = self.client.get(f"/users/{loaded['user_id']}").json()["interactions"]
+        self.assertEqual([(row["type"], row["date"], row["item"]) for row in interactions],
+                         [("skipped", str(today), shown["item"])])
+        self.assertEqual(app.session_state["today"], today + timedelta(days=1))
 
 
 if __name__ == "__main__":

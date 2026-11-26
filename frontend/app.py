@@ -11,8 +11,10 @@ API = os.environ.get("MARATHON_API", "http://localhost:8000")
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 MIN_KM, MAX_KM = 1.0, 100.0
 MIN_MINUTES, MAX_MINUTES = 1.0, 900.0
-RUN_NAMES = {"much faster": "Fast-paced run", "faster": "Faster run", "slightly faster": "Brisk run",
-             "usual": "Steady run", "slightly easier": "Relaxed run", "easier": "Easy-paced run"}
+# Each session type is a distance band crossed with a pace band relative to the runner's own
+# median pace over the last 28 days. Titles name both, so two different types never share a title.
+PACE_LABELS = {"much faster": "much faster", "faster": "faster", "slightly faster": "a little faster",
+               "usual": "usual pace", "slightly easier": "a little easier", "easier": "easier"}
 
 st.set_page_config(page_title="StridePlan", page_icon="🏃", layout="wide")
 st.markdown("""
@@ -57,8 +59,35 @@ def duration_text(minutes):
     return f"{hours} h {remainder:02d}" if remainder else f"{hours} h"
 
 
-def run_name(item):
-    return RUN_NAMES.get(item.get("intensity"), item["title"])
+def session_title(item):
+    """Distance and pace band of a session type, e.g. "11 km · a little faster"."""
+    return f"{item['km']:g} km · {PACE_LABELS.get(item.get('intensity'), item.get('intensity', ''))}"
+
+
+def share(item):
+    return f"{item['probability']:.0%}"
+
+
+def rank_text(item):
+    return f"#{item['rank']} · {share(item)}"
+
+
+def other_options(day, count=2):
+    """The highest-ranked session types other than the one planned for the day."""
+    return [item for item in day["recommendations"] if item["item"] != day["planned"]["item"]][:count]
+
+
+def because_text(item):
+    """One line naming the past runs the model attended to most for this session, or None."""
+    runs = item.get("because_of") or []
+    if not runs:
+        return None
+    return "Because of: " + ", ".join(f"{date.fromisoformat(run['date']):%a %d %b} {run['km']:g} km" for run in runs)
+
+
+def pace_text(minutes_per_km):
+    seconds = round(minutes_per_km * 60)
+    return f"{seconds // 60}:{seconds % 60:02d}/km"
 
 
 def activate_runner(user_id, today, label):
@@ -128,6 +157,7 @@ if "user_id" not in st.session_state:
 user = call("GET", f"/users/{st.session_state.user_id}")
 today = st.session_state.today
 recommendation = call("POST", "/recommend", json={"user_id": user["user_id"], "date": str(today), "top_k": 3})
+session = recommendation["planned"]
 st.title("Your next run")
 runner_label = st.session_state.get("runner_label", user["user_id"])
 race_date = date.fromisoformat(user["race_date"]) if user["race_date"] else None
@@ -142,45 +172,58 @@ if notice:
 
 today_tab, week_tab, history_tab = st.tabs(["Today", "Your week", "History"])
 with today_tab:
-    if not recommendation["recommendations"]:
-        st.info("There are no session suggestions for this day.")
+    with st.container(border=True, key="today_card"):
+        st.caption(f"{recommendation['phase'].capitalize()} · {rank_text(session)} in the model's ranking")
+        st.subheader(session_title(session))
+        distance, pace, duration = st.columns(3)
+        distance.metric("Distance", f"{session['km']:g} km")
+        pace.metric("Pace", session["pace"])
+        duration.metric("Time", duration_text(session["minutes"]))
+        because = because_text(session)
+        if because:
+            st.markdown(because, help="The past runs the model paid most attention to when it scored this session "
+                                      "(cross-attention weights). They show what it looked at, not a training rule.")
+        if recommendation["strategy"] == "phase_popularity":
+            st.caption("Based on common runs at this stage. Add at least five recent runs for a personalised ranking.")
+        else:
+            st.caption("Ranked from your recent runs and your race date. Pace bands are relative to your median "
+                       f"pace over the last 28 days ({pace_text(recommendation['reference_pace'])}).")
+        done, missed = st.columns(2)
+        if done.button("Log run", type="primary", width="stretch"):
+            st.session_state.show_completion = True
+        if missed.button("Missed today", width="stretch"):
+            log("missed", today)
+    if st.session_state.get("show_completion", False):
+        with st.container(border=True, key="completion_card"):
+            st.subheader("How did your run go?")
+            with st.form(f"complete-{user['user_id']}-{today}"):
+                distance_input, time_input = st.columns(2)
+                km = distance_input.number_input("Distance (km)", MIN_KM, MAX_KM,
+                                                 min(max(float(session["km"]), MIN_KM), MAX_KM))
+                minutes = time_input.number_input("Time (min)", MIN_MINUTES, MAX_MINUTES,
+                                                  min(max(float(session["minutes"]), MIN_MINUTES), MAX_MINUTES))
+                feelings = {"Felt right": "ok", "Too easy": "too_easy", "Too hard": "too_hard"}
+                feeling = st.selectbox("Effort", list(feelings))
+                if st.form_submit_button("Save run", type="primary"):
+                    log("completed", today, rec_id=recommendation["rec_id"], item=session["item"],
+                        km=km, minutes=minutes, effort=feelings[feeling])
+    others = other_options(recommendation)
+    if others:
+        st.markdown("**Other options the model ranks highly**")
+        for column, option in zip(st.columns(len(others)), others):
+            with column.container(border=True):
+                st.caption(rank_text(option))
+                st.markdown(f"**{session_title(option)}**")
+                st.write(f"{option['pace']} · {duration_text(option['minutes'])}")
+    if recommendation["strategy"] == "phase_popularity":
+        st.caption("Percentages are shares of training sessions at this stage. Today's session is drawn from them.")
     else:
-        top = recommendation["recommendations"][0]
-        with st.container(border=True, key="today_card"):
-            st.caption(recommendation["phase"].capitalize())
-            st.subheader(run_name(top))
-            distance, pace, duration = st.columns(3)
-            distance.metric("Distance", f"{top['km']:g} km")
-            pace.metric("Pace", top["pace"])
-            duration.metric("Time", duration_text(top["minutes"]))
-            if recommendation["strategy"] == "phase_popularity":
-                st.caption("Based on common runs at this stage. Add at least five recent runs for a personalised ranking.")
-            else:
-                st.caption("Picked from your recent runs and your race date.")
-            done, missed = st.columns(2)
-            if done.button("Log run", type="primary", width="stretch"):
-                st.session_state.show_completion = True
-            if missed.button("Missed today", width="stretch"):
-                log("missed", today)
-        if st.session_state.get("show_completion", False):
-            with st.container(border=True, key="completion_card"):
-                st.subheader("How did your run go?")
-                with st.form(f"complete-{user['user_id']}-{today}"):
-                    distance_input, time_input = st.columns(2)
-                    km = distance_input.number_input("Distance (km)", MIN_KM, MAX_KM,
-                                                     min(max(float(top["km"]), MIN_KM), MAX_KM))
-                    minutes = time_input.number_input("Time (min)", MIN_MINUTES, MAX_MINUTES,
-                                                      min(max(float(top["minutes"]), MIN_MINUTES), MAX_MINUTES))
-                    feelings = {"Felt right": "ok", "Too easy": "too_easy", "Too hard": "too_hard"}
-                    feeling = st.selectbox("Effort", list(feelings))
-                    if st.form_submit_button("Save run", type="primary"):
-                        log("completed", today, rec_id=recommendation["rec_id"], item=top["item"],
-                            km=km, minutes=minutes, effort=feelings[feeling])
-        with st.expander("Other suggestions"):
-            for option in recommendation["recommendations"][1:]:
-                st.write(f"**{run_name(option)}** · {option['km']:g} km · {option['pace']} · {duration_text(option['minutes'])}")
-            if st.button("Skip this suggestion and move to tomorrow"):
-                log("skipped", today, rec_id=recommendation["rec_id"], item=top["item"])
+        st.caption("Percentages are the model's probability over 66 session types: it predicts what a runner with "
+                   "your history is likely to do next, and no single session is very likely. Today's session is "
+                   "drawn from those probabilities, as is every day of your week, so a week varies like real "
+                   "training instead of repeating the single most likely session.")
+    if st.button("Skip this session and move to tomorrow"):
+        log("skipped", today, rec_id=recommendation["rec_id"], item=session["item"])
 
 with week_tab:
     st.subheader("The next seven days")
@@ -191,12 +234,15 @@ with week_tab:
         if plan["days"]:
             rows = []
             for day in plan["days"]:
-                session = day["recommendations"][0]
+                planned = day["planned"]
                 rows.append({"Day": pd.Timestamp(day["date"]).strftime("%a %d %b"),
-                             "Run": run_name(session), "Distance": f"{session['km']:g} km",
-                             "Pace": session["pace"], "Time": duration_text(session["minutes"])})
+                             "Session": session_title(planned), "Pace": planned["pace"],
+                             "Time": duration_text(planned["minutes"]), "Model rank": rank_text(planned),
+                             "Top-ranked options": " / ".join(session_title(item) for item in other_options(day))})
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-            st.caption("The week assumes you complete each suggested run. Log what happens to update the next plan.")
+            st.caption("Each session is drawn from the model's probabilities, then assumed done before the next day. "
+                       "Model rank shows where it stands among 66 session types. The plan stays the same while you "
+                       "follow it; log what happens to update it.")
         else:
             st.info("There are no training days in this period before your race.")
     else:

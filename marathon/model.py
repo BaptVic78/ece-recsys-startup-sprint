@@ -46,7 +46,15 @@ class ContextCrossAttentionRecommender(nn.Module):
         self.head = nn.Sequential(nn.LayerNorm(dim), nn.Linear(dim, dim), nn.GELU(), nn.Linear(dim, 1))
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, batch):
+    def forward(self, batch, return_attention=False):
+        """Scores of all candidates, shape [batch, num_items].
+
+        With `return_attention=True`, also return the cross-attention weights of every candidate
+        over the history, averaged over heads: shape [batch, num_items, history]. Each candidate's
+        weights sum to 1 over the valid history positions and are 0 on padding. Call it in eval
+        mode: in training mode the weights include attention dropout. The default call does not
+        compute the weights, so training and evaluation are unchanged.
+        """
         items, mask = batch["items"], batch["mask"]
         if items.ndim != 2 or mask.shape != items.shape:
             raise ValueError("items and mask must have shape [batch, history]")
@@ -62,6 +70,8 @@ class ContextCrossAttentionRecommender(nn.Module):
         history = self.encoder(self.dropout(history), src_key_padding_mask=~mask)
         candidates = self.item.weight[1:] + self.attributes(self.item_attributes)
         queries = self.query_norm(candidates[None, :, :] + context[:, None, :])
-        attended, _ = self.cross(queries, self.history_norm(history), self.history_norm(history),
-                                 key_padding_mask=~mask, need_weights=False)
-        return self.head(queries + attended).squeeze(-1)
+        attended, weights = self.cross(queries, self.history_norm(history), self.history_norm(history),
+                                       key_padding_mask=~mask, need_weights=return_attention,
+                                       average_attn_weights=True)
+        scores = self.head(queries + attended).squeeze(-1)
+        return (scores, weights) if return_attention else scores
