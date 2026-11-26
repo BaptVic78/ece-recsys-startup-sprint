@@ -29,7 +29,7 @@ def phase_name(days_to_race):
         return "race day"
     weeks = days_to_race // 7 + 1
     if weeks <= 3:
-        return f"taper, race in {days_to_race} days"
+        return f"taper, race in {days_to_race} day{'s' if days_to_race > 1 else ''}"
     if weeks <= 10:
         return f"peak training, race in {weeks} weeks"
     if weeks <= 21:
@@ -50,6 +50,38 @@ def prescription(item, reference_pace):
     return {"item": int(item), "title": f"{km:g} km {info['intensity']} run", "distance_range": range_text,
             "intensity": info["intensity"], "km": km, "pace_min_per_km": round(pace, 2),
             "pace": f"{seconds // 60}:{seconds % 60:02d}/km", "minutes": minutes}
+
+
+PLAN_STRATEGIES = ("sample", "greedy")
+PLAN_TOP_P = 0.9
+
+
+def session_probabilities(scores, strategy):
+    """Model logits become a softmax; the cold-start fallback's counts become frequencies."""
+    scores = np.asarray(scores, dtype=float)
+    if strategy == "model":
+        weights = np.exp(scores - scores.max())
+    else:
+        weights = np.clip(scores, 0, None)
+    return weights / weights.sum()
+
+
+def day_rng(seed, date):
+    """Generator for one planned day, from the seed and that day's date only.
+
+    A day's draw then changes only when the history before it changes: following the plan
+    and asking again from the next day returns the same remaining sessions.
+    """
+    return np.random.default_rng([int(seed), pd.Timestamp(date).toordinal()])
+
+
+def nucleus_sample(probabilities, top_p, rng):
+    """Draw an index from the smallest highest-probability set whose mass reaches top_p."""
+    order = np.argsort(-probabilities, kind="stable")
+    cumulative = np.cumsum(probabilities[order])
+    keep = order[:int(np.searchsorted(cumulative, top_p) + 1)]
+    weights = probabilities[keep] / probabilities[keep].sum()
+    return int(rng.choice(keep, p=weights))
 
 
 def export_phase_popularity(sessions_path, model_dir):
@@ -136,21 +168,53 @@ class Recommender:
         return scores, {"strategy": strategy, "history_sessions": int(target), "reference_pace": float(reference),
                         "days_to_race": None if not np.isfinite(days_to_race) else int(days_to_race)}
 
-    def recommend(self, sessions, target_date, race_date=None, top_k=10):
-        scores, info = self.rank(sessions, target_date, race_date)
-        order = np.argsort(-scores, kind="stable")[:top_k]
-        items = [{"rank": rank + 1, "score": float(scores[index]), **prescription(index + 1, info["reference_pace"])}
-                 for rank, index in enumerate(order)]
+    def _day(self, scores, info, target_date, top_k):
+        order = np.argsort(-scores, kind="stable")
+        probabilities = session_probabilities(scores, info["strategy"])
+        items = [{"rank": rank + 1, "score": float(scores[index]), "probability": float(probabilities[index]),
+                  **prescription(index + 1, info["reference_pace"])}
+                 for rank, index in enumerate(order[:top_k])]
         return {"date": str(pd.Timestamp(target_date).date()), "phase": phase_name(info["days_to_race"]),
-                **info, "model": self.name, "recommendations": items}
+                **info, "model": self.name, "recommendations": items}, order
 
-    def plan(self, sessions, run_dates, race_date=None, top_k=3):
-        """Roll the model forward: each planned day's top session is assumed done before the next day."""
+    def _planned(self, scores, info, order, target_date, strategy, seed, top_p):
+        """The session planned for one day: the top-ranked type, or a draw from the model's distribution."""
+        if strategy not in PLAN_STRATEGIES:
+            raise ValueError(f"strategy must be one of {PLAN_STRATEGIES}")
+        probabilities = session_probabilities(scores, info["strategy"])
+        if strategy == "greedy":
+            chosen = int(order[0])
+        else:
+            chosen = nucleus_sample(probabilities, top_p, day_rng(seed, target_date))
+        return {"rank": int(np.flatnonzero(order == chosen)[0]) + 1, "score": float(scores[chosen]),
+                "probability": float(probabilities[chosen]), **prescription(chosen + 1, info["reference_pace"])}
+
+    def recommend(self, sessions, target_date, race_date=None, top_k=10, strategy=None, seed=0, top_p=PLAN_TOP_P):
+        """Ranked session types for one day. With a `strategy`, also the session `planned` for that day,
+        drawn exactly as `plan` draws it, so a day shows the same session in both views."""
+        scores, info = self.rank(sessions, target_date, race_date)
+        day, order = self._day(scores, info, target_date, top_k)
+        if strategy is not None:
+            day["planned"] = self._planned(scores, info, order, target_date, strategy, seed, top_p)
+            day["plan_strategy"] = strategy
+        return day
+
+    def plan(self, sessions, run_dates, race_date=None, top_k=3, strategy="sample", seed=0, top_p=PLAN_TOP_P):
+        """Roll the model forward over the run dates; each planned session is assumed done before the next.
+
+        `strategy="sample"` (default) draws each day's session from the model's own distribution,
+        restricted to the smallest set of types covering `top_p` of the probability (nucleus
+        sampling). Each day has its own generator, seeded by `seed` and the date, so a plan is
+        reproducible and stays the same when the runner follows it. `strategy="greedy"` always
+        takes the top-ranked type: the most likely session each day, but the most likely session
+        rarely changes within a week, so greedy weeks repeat one session.
+        """
+        if strategy not in PLAN_STRATEGIES:
+            raise ValueError(f"strategy must be one of {PLAN_STRATEGIES}")
         history = list(sessions)
         days = []
         for date in sorted(pd.Timestamp(d).normalize() for d in run_dates):
-            day = self.recommend(history, date, race_date, top_k)
+            day = self.recommend(history, date, race_date, top_k, strategy=strategy, seed=seed, top_p=top_p)
             days.append(day)
-            best = day["recommendations"][0]
-            history.append({"date": date, "km": best["km"], "minutes": best["km"] * best["pace_min_per_km"]})
+            history.append({"date": date, "km": day["planned"]["km"], "minutes": day["planned"]["minutes"]})
         return days

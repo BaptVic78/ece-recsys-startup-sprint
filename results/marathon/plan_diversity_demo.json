@@ -1,0 +1,54 @@
+{
+  "weeks": 43,
+  "runners": 12,
+  "sessions": 180,
+  "summary": {
+    "real": {
+      "distinct_types_share": 0.9502,
+      "consecutive_repeat_rate": 0.031,
+      "weekly_km": 50.2195,
+      "longest_over_shortest": 3.4625,
+      "has_run_of_18km_or_more": 0.6279,
+      "type_accuracy": 1.0,
+      "weekly_km_abs_error": 0.0
+    },
+    "greedy": {
+      "distinct_types_share": 0.6993,
+      "consecutive_repeat_rate": 0.3329,
+      "weekly_km": 51.0465,
+      "longest_over_shortest": 3.0951,
+      "has_run_of_18km_or_more": 0.6744,
+      "type_accuracy": 0.1487,
+      "weekly_km_abs_error": 8.5479
+    },
+    "sample": {
+      "distinct_types_share": 0.9279,
+      "consecutive_repeat_rate": 0.0814,
+      "weekly_km": 54.5,
+      "longest_over_shortest": 3.6344,
+      "has_run_of_18km_or_more": 0.6744,
+      "type_accuracy": 0.0609,
+      "weekly_km_abs_error": 12.0033
+    },
+    "phase_sample": {
+      "distinct_types_share": 0.9632,
+      "consecutive_repeat_rate": 0.0116,
+      "weekly_km": 56.186,
+      "longest_over_shortest": 3.4658,
+      "has_run_of_18km_or_more": 0.5581,
+      "type_accuracy": 0.0182,
+      "weekly_km_abs_error": 16.6312
+    }
+  },
+  "js_divergence_to_real_type_distribution": {
+    "greedy": 0.2077322106337904,
+    "sample": 0.14273300034450198,
+    "phase_sample": 0.13343083422068508
+  },
+  "distinct_types_used": {
+    "real": 48,
+    "greedy": 34,
+    "sample": 52,
+    "phase_sample": 53
+  }
+}
