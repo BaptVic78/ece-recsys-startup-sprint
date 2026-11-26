@@ -12,10 +12,10 @@ import numpy as np
 import pandas as pd
 import torch
 
-from marathon.data import NUM_ITEMS, describe_item
+from marathon.data import DISTANCE_POINTS, INTENSITY_EDGES, NUM_ITEMS, describe_item
 from marathon.evaluate import PHASES, Baselines, per_target_metrics, target_ranks
 from marathon.model import ContextCrossAttentionRecommender
-from marathon.sequences import item_attributes, load_store
+from marathon.sequences import item_attributes, load_store, race_bucket
 from marathon.train import baseline_ranks, model_scores
 
 NAMES = {"full": "Context-aware Transformer (ours)", "no_race_context": "Ablation: same model without race context",
@@ -67,17 +67,25 @@ def plot_curves(reports, path):
 SWEEP_DAYS = [70, 56, 42, 35, 28, 21, 14, 10, 7, 4, 2, 1]
 
 
+def one_target_per_runner(store, targets, rng, sample):
+    """One random target per runner, for `sample` distinct runners, so every runner weighs the same."""
+    athletes = store.sessions["athlete"].to_numpy()[targets]
+    order = rng.permutation(len(targets))
+    _, first = np.unique(athletes[order], return_index=True)
+    per_runner = targets[order[first]]
+    return np.sort(rng.choice(per_runner, min(sample, len(per_runner)), replace=False))
+
+
 def race_date_sweep(models, store, targets, rng, sample=2000):
     """Counterfactual: keep each runner's history, move only the declared race date.
 
     For every target, the race is placed `days` after the target day and the race-calendar
     buckets of the history are shifted consistently. The output is the expected distance of
     the recommended session (softmax-weighted over the 66 types). A model without race context
-    must give the same value for every `days`.
+    must give the same value for every `days`. Each runner counts once: one random eligible
+    target is drawn per runner, then `sample` distinct runners are drawn.
     """
-    from marathon.sequences import race_bucket
-    from marathon.serving import DISTANCE_POINTS, INTENSITY_EDGES
-    chosen = np.sort(rng.choice(targets, min(sample, len(targets)), replace=False))
+    chosen = one_target_per_runner(store, targets, rng, sample)
     batch = store.batch(chosen)
     dates = store.sessions["date"].to_numpy("datetime64[D]")
     offsets = np.arange(-batch["items"].shape[1], 0)
@@ -96,6 +104,7 @@ def race_date_sweep(models, store, targets, rng, sample=2000):
             probabilities = torch.softmax(logits, dim=1).numpy()
             values.append(float((probabilities * km[None, :]).sum(axis=1).mean()))
         result[name] = dict(zip(SWEEP_DAYS, values))
+    result["runners"] = int(len(np.unique(store.sessions["athlete"].to_numpy()[chosen])))
     return result
 
 
@@ -105,6 +114,8 @@ def plot_sweep(sweep, path):
     import matplotlib.pyplot as plt
     figure, axis = plt.subplots(figsize=(6.5, 3.8))
     for name, values in sweep.items():
+        if name == "runners":
+            continue
         axis.plot(list(values), list(values.values()), marker="o", label=name)
     axis.invert_xaxis()
     axis.set(title="Same histories, only the race date moves", xlabel="days until the declared race",
@@ -231,7 +242,8 @@ def main():
                     for name in order], ["Method", "Coverage@10", "Mean popularity rank@10"])
     ours, ablation = sweep["ours"], sweep["ablation (no race context)"]
     lines += ["", "## Innovation check: moving only the race date", "",
-              f"2,000 test runners preparing a race (2 to 20 weeks out). Their histories are kept; only the declared race "
+              f"{sweep['runners']:,} distinct test runners preparing a race (2 to 20 weeks out), one session each. "
+              "Their histories are kept; only the declared race "
               f"date moves. Expected distance of the recommended session: {ours[70]:.1f} km with the race 70 days away, "
               f"{ours[14]:.1f} km at 14 days, {ours[2]:.1f} km at 2 days. The ablation stays at {ablation[70]:.1f} km "
               "whatever the date, as it must. The model learned to taper from data; no rule encodes it.", "",
