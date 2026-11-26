@@ -1,0 +1,82 @@
+name: Clean-machine quick start
+
+# Q6 check: a fresh Ubuntu VM that has never seen the project follows the README quick start
+# word for word (public git clone, then docker compose up) with no registry login and no cache,
+# is timed against the 5-minute limit, then the running app is checked end to end.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quick-start:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Follow the README quick start on a fresh machine
+        id: run
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          set -euo pipefail
+          docker logout ghcr.io >/dev/null 2>&1 || true
+          test -z "$(docker images -q)" || docker image prune -af >/dev/null
+          start=$(date +%s)
+          cd "$RUNNER_TEMP"
+          # README step 1-2: clone and enter the repository.
+          git clone --branch "$BRANCH" "$REPO_URL" ece-recsys-startup-sprint
+          cd ece-recsys-startup-sprint
+          # README step 3: one command.
+          docker compose up -d --wait 2>&1 | tee compose.log
+          ready=$(date +%s)
+          seconds=$((ready - start))
+          if grep -qiE "building|built" compose.log; then
+            path="built locally (prebuilt image not publicly available)"
+          else
+            path="prebuilt image pulled from GHCR"
+          fi
+          echo "seconds=$seconds" >> "$GITHUB_OUTPUT"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+          echo "dir=$PWD" >> "$GITHUB_OUTPUT"
+          echo "Ready in ${seconds}s ($path)"
+      - name: Check the running app end to end
+        working-directory: ${{ steps.run.outputs.dir }}
+        run: python3 scripts/check_docker.py
+      - name: Report
+        if: always()
+        env:
+          SECONDS_TO_READY: ${{ steps.run.outputs.seconds }}
+          IMAGE_PATH: ${{ steps.run.outputs.path }}
+          APP_DIR: ${{ steps.run.outputs.dir }}
+        run: |
+          {
+            echo "## Clean-machine quick start"
+            echo ""
+            echo "| Check | Result |"
+            echo "| --- | --- |"
+            echo "| Machine | fresh \`ubuntu-latest\` runner, no registry login, no local images |"
+            echo "| Commands | \`git clone\` + \`docker compose up -d --wait\` (README quick start) |"
+            echo "| Time from clone to app ready | ${SECONDS_TO_READY:-n/a} s (limit 300 s) |"
+            echo "| Image | ${IMAGE_PATH:-n/a} |"
+            if [ -f "$APP_DIR/artifacts/docker-checks.json" ]; then
+              echo ""
+              echo "End-to-end check (real model, /log_interaction saved, restart persistence):"
+              echo '```json'
+              cat "$APP_DIR/artifacts/docker-checks.json"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Enforce the 5-minute limit
+        env:
+          SECONDS_TO_READY: ${{ steps.run.outputs.seconds }}
+        run: test "$SECONDS_TO_READY" -le 300
+      - name: Stop the app
+        if: always()
+        working-directory: ${{ steps.run.outputs.dir }}
+        run: docker compose down -v || true
