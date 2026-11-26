@@ -18,7 +18,7 @@ Local checks on Windows with Docker Desktop, 26 November 2026.
 | Next weekly plan | Returned 4 running days |
 | Deliberately failing test | Test command returned exit code 1 in a disposable container |
 
-The failing test was never added to the working tree. The unchanged app suite was
+The local failure check used a disposable container. The unchanged app suite was
 run again and passed. Local logs and the API check report are in `artifacts/`
 (ignored by Git).
 
@@ -26,10 +26,18 @@ The image uses CPU wheels and skips pip bytecode compilation. Docker reports
 1.77 GB of local image storage, above the suggested 1.5 GB target.
 There is no dataset download at startup.
 
-## Checks still needed on GitHub
+## GitHub checks
 
-- Push the branch and open the PR after the local review.
-- Record a red then green Actions run on the PR; check the green run on main.
+[PR #17](https://github.com/BaptVic78/ece-recsys-startup-sprint/pull/17)
+is open, with TaDLpZ requested for review.
+
+- [First test run: passed](https://github.com/BaptVic78/ece-recsys-startup-sprint/actions/runs/45852639205).
+- [Temporary failing test: correctly failed](https://github.com/BaptVic78/ece-recsys-startup-sprint/actions/runs/45852752920).
+- The temporary test was removed. See the [current PR checks](https://github.com/BaptVic78/ece-recsys-startup-sprint/pull/17/checks) for the restored run.
+
+## Checks after review
+
+- After merge, check the green test run on main.
 - After merge, check the GHCR publication, make the package public and test a pull
   without login.
 - Ask TaDLpZ to time a clean-machine launch and add a screenshot to the PR.
