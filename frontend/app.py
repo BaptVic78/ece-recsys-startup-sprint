@@ -13,8 +13,8 @@ import pandas as pd
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ui import (PACE_LABELS, call, clock, duration_text, other_options, pace_text, rank_text,  # noqa: E402
-                session_title, setup)
+from ui import (PACE_LABELS, because_text, call, clock, duration_text, other_options,  # noqa: E402
+                pace_text, rank_text, session_title, setup)
 
 WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 MIN_KM, MAX_KM = 1.0, 100.0
@@ -199,6 +199,10 @@ with today_tab:
         distance.metric("Distance", f"{session['km']:g} km")
         pace.metric("Pace", session["pace"])
         duration.metric("Time", duration_text(session["minutes"]))
+        because = because_text(session)
+        if because:
+            st.markdown(because, help="The past runs the model paid most attention to when it scored this session "
+                                      "(cross-attention weights). They show what it looked at, not a training rule.")
         if recommendation["strategy"] == "phase_popularity":
             st.caption("Based on common runs at this stage. Add at least five recent runs for a personalised plan.")
         else:

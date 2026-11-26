@@ -52,6 +52,28 @@ def prescription(item, reference_pace):
             "pace": f"{seconds // 60}:{seconds % 60:02d}/km", "minutes": minutes}
 
 
+EXPLAIN_TOP = 3
+
+
+def because_of(weights, frame, positions, valid, top=EXPLAIN_TOP):
+    """The `top` history sessions a candidate attended to most, highest weight first.
+
+    `weights` are one candidate's cross-attention weights over the model's history window,
+    `positions` the row of each window slot in `frame` (the SessionStore's sorted sessions)
+    and `valid` which slots hold a real session.
+    Padding slots are never returned, even if their weight ties with a real session.
+    """
+    slots = [slot for slot in np.argsort(-weights, kind="stable") if valid[slot]][:top]
+    result = []
+    for slot in slots:
+        row = frame.iloc[int(positions[slot])]
+        seconds = round(float(row["pace"]) * 60)
+        result.append({"date": str(row["date"].date()), "km": round(float(row["km"]), 1),
+                       "minutes": round(float(row["minutes"]), 1), "pace": f"{seconds // 60}:{seconds % 60:02d}/km",
+                       "weight": round(float(weights[slot]), 3)})
+    return result
+
+
 PLAN_STRATEGIES = ("sample", "greedy")
 PLAN_TOP_P = 0.9
 
@@ -148,6 +170,15 @@ class Recommender:
 
     def rank(self, sessions, target_date, race_date=None):
         """Scores for all session types on target_date and the strategy that produced them."""
+        scores, info, _ = self._rank(sessions, target_date, race_date)
+        return scores, info
+
+    def _rank(self, sessions, target_date, race_date=None):
+        """`rank`, plus a function giving the `because_of` sessions of a 0-based item index.
+
+        Scores come from the model's default call, so they are exactly those of `rank` and of
+        offline evaluation; the attention weights come from a second call used only to explain.
+        """
         frame = self._frame(sessions, target_date, race_date)
         target = len(frame) - 1
         days_to_race = frame["days_to_race"].iloc[target]
@@ -159,25 +190,33 @@ class Recommender:
             bucket = int(race_bucket([days_to_race])[0])
             scores = self.phase_popularity[bucket] + self.phase_popularity.sum(axis=0) * 1e-6
             strategy = "phase_popularity"
+            explain = lambda index: []  # noqa: E731 - no model, so no attention to explain with
         else:
             store = SessionStore(frame)
-            batch = store.batch(np.array([target]), max_history=self.config["max_history"])
+            max_history = self.config["max_history"]
+            batch = store.batch(np.array([target]), max_history=max_history)
+            inputs = {key: torch.as_tensor(value) for key, value in batch.items()}
             with torch.no_grad():
-                scores = self.model({key: torch.as_tensor(value) for key, value in batch.items()})[0].numpy()
+                scores = self.model(inputs)[0].numpy()
+                weights = self.model(inputs, return_attention=True)[1][0].numpy()
+            positions = target + np.arange(-max_history, 0)
+            valid = batch["mask"][0]
+            explain = lambda index: because_of(weights[index], store.sessions, positions, valid)  # noqa: E731
             strategy = "model"
-        return scores, {"strategy": strategy, "history_sessions": int(target), "reference_pace": float(reference),
-                        "days_to_race": None if not np.isfinite(days_to_race) else int(days_to_race)}
+        info = {"strategy": strategy, "history_sessions": int(target), "reference_pace": float(reference),
+                "days_to_race": None if not np.isfinite(days_to_race) else int(days_to_race)}
+        return scores, info, explain
 
-    def _day(self, scores, info, target_date, top_k):
+    def _day(self, scores, info, target_date, top_k, explain=lambda index: []):
         order = np.argsort(-scores, kind="stable")
         probabilities = session_probabilities(scores, info["strategy"])
         items = [{"rank": rank + 1, "score": float(scores[index]), "probability": float(probabilities[index]),
-                  **prescription(index + 1, info["reference_pace"])}
+                  **prescription(index + 1, info["reference_pace"]), "because_of": explain(index)}
                  for rank, index in enumerate(order[:top_k])]
         return {"date": str(pd.Timestamp(target_date).date()), "phase": phase_name(info["days_to_race"]),
                 **info, "model": self.name, "recommendations": items}, order
 
-    def _planned(self, scores, info, order, target_date, strategy, seed, top_p):
+    def _planned(self, scores, info, order, target_date, strategy, seed, top_p, explain=lambda index: []):
         """The session planned for one day: the top-ranked type, or a draw from the model's distribution."""
         if strategy not in PLAN_STRATEGIES:
             raise ValueError(f"strategy must be one of {PLAN_STRATEGIES}")
@@ -187,15 +226,16 @@ class Recommender:
         else:
             chosen = nucleus_sample(probabilities, top_p, day_rng(seed, target_date))
         return {"rank": int(np.flatnonzero(order == chosen)[0]) + 1, "score": float(scores[chosen]),
-                "probability": float(probabilities[chosen]), **prescription(chosen + 1, info["reference_pace"])}
+                "probability": float(probabilities[chosen]), **prescription(chosen + 1, info["reference_pace"]),
+                "because_of": explain(chosen)}
 
     def recommend(self, sessions, target_date, race_date=None, top_k=10, strategy=None, seed=0, top_p=PLAN_TOP_P):
         """Ranked session types for one day. With a `strategy`, also the session `planned` for that day,
         drawn exactly as `plan` draws it, so a day shows the same session in both views."""
-        scores, info = self.rank(sessions, target_date, race_date)
-        day, order = self._day(scores, info, target_date, top_k)
+        scores, info, explain = self._rank(sessions, target_date, race_date)
+        day, order = self._day(scores, info, target_date, top_k, explain)
         if strategy is not None:
-            day["planned"] = self._planned(scores, info, order, target_date, strategy, seed, top_p)
+            day["planned"] = self._planned(scores, info, order, target_date, strategy, seed, top_p, explain)
             day["plan_strategy"] = strategy
         return day
 

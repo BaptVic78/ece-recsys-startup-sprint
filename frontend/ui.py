@@ -1,6 +1,7 @@
 """Shared helpers for the StridePlan pages: API calls, formatting and the site style."""
 
 import os
+from datetime import date
 
 import requests
 import streamlit as st
@@ -102,6 +103,14 @@ def rank_text(item):
 def other_options(day, count=2):
     """The highest-ranked session types other than the one planned for the day."""
     return [item for item in day["recommendations"] if item["item"] != day["planned"]["item"]][:count]
+
+
+def because_text(item):
+    """One line naming the past runs the model attended to most for this session, or None."""
+    runs = item.get("because_of") or []
+    if not runs:
+        return None
+    return "Because of: " + ", ".join(f"{date.fromisoformat(run['date']):%a %d %b} {run['km']:g} km" for run in runs)
 
 
 def pace_text(minutes_per_km):
