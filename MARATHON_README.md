@@ -115,3 +115,22 @@ Reproduce with `python -m marathon.train`, `python -m marathon.train --no-race-c
 - Variety and mix measure realism, not personalisation. Sampling the phase-popularity fallback, which ignores the runner, matches them too. However, it matches the real session on only 2.3% of days and misses the weekly volume by 17.9 km, against 5.9% and 11.0 km for the model's sampled weeks. The runner's history shows in the per-day match and the weekly volume. The 12 committed demo runners show the same pattern (43 real weeks, `python -m marathon.plan_eval --demo`, [results](results/marathon/PLAN_DIVERSITY_DEMO.md); indicative only given the size).
 
 The table comes from `python -m marathon.plan_eval` on the full test set, rerun after per-day seeding. The model's ranking quality is unchanged and is reported in MARATHON_RESULTS.md.
+
+## Finish-time forecast
+
+`marathon/forecast.py` learns a marathon finish time from the runner's last 12 weeks. A linear model uses five features:
+- Riegel's projection of the fastest run of 10 km or more;
+- median pace;
+- km per week;
+- runs per week;
+- longest run.
+
+It follows the same temporal protocol as the recommender. It is fitted on the spring 2019 majors (Boston and London, 6,455 runners) and tested on the autumn majors (Berlin, Chicago and New York, 7,944 runners), with features taken 3 weeks before each race.
+
+| Method | Mean absolute error on the autumn majors |
+| --- | ---: |
+| **Forecast model** | **19.9 min** |
+| Riegel projection alone | 22.5 min |
+| Mean finish time | 40.9 min |
+
+The likely range shown in the app is the 10th–90th percentile of training errors. It covered 69% of autumn results instead of 80%, so the app presents it as indicative. To refit: `python -m marathon.forecast` (needs the processed data); it writes `models/marathon/forecast.json`.

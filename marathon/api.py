@@ -3,6 +3,7 @@
 Run with `python -m uvicorn marathon.api:app --host 0.0.0.0 --port 8000` and open /docs.
 """
 
+import json
 import os
 import time
 import zlib
@@ -16,6 +17,8 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from marathon.data import MIN_SESSION_KM, NUM_ITEMS, PACE_RANGE, describe_item, plausible_pace
+from marathon.forecast import features as forecast_features
+from marathon.forecast import predict as forecast_predict
 from marathon.serving import PLAN_STRATEGIES, Recommender
 from marathon.store import EFFORTS, INTERACTION_TYPES, InteractionError, Store
 
@@ -66,7 +69,7 @@ class PlanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     user_id: str = Field(min_length=1, max_length=100)
     start_date: Optional[Date] = None
-    days: int = Field(default=7, ge=1, le=28, strict=True)
+    days: int = Field(default=7, ge=1, le=140, strict=True, description="up to 20 weeks, enough to reach the race")
     run_weekdays: list[int] = Field(default=[1, 3, 5, 6], min_length=1, max_length=7,
                                     description="0 = Monday ... 6 = Sunday")
     top_k: int = Field(default=3, ge=1, le=10, strict=True)
@@ -122,6 +125,8 @@ def create_app(model_dir=MODEL_DIR, db_path=DB_PATH, demo_dir=DEMO_DIR):
     recommender = Recommender(model_dir)
     store = Store(db_path)
     demo_dir = Path(demo_dir)
+    forecast_path = Path(model_dir) / "forecast.json"
+    forecast_model = json.loads(forecast_path.read_text(encoding="utf-8")) if forecast_path.exists() else None
     app = FastAPI(title="StridePlan Marathon", version="1.0.0",
                   description="Context-aware sequential recommender of marathon training sessions")
     app.state.store = store
@@ -158,6 +163,27 @@ def create_app(model_dir=MODEL_DIR, db_path=DB_PATH, demo_dir=DEMO_DIR):
         user = require_user(user_id)
         return {**user, "goal_pace": goal_pace(user["goal_minutes"]), "next_day": str(default_day(user_id)),
                 "sessions": store.sessions(user_id), "interactions": store.interactions(user_id)}
+
+    @app.get("/users/{user_id}/forecast")
+    def forecast(user_id: str, date: Optional[Date] = None):
+        """Marathon finish-time forecast from the runner's last 12 weeks (see marathon/forecast.py)."""
+        require_user(user_id)
+        if forecast_model is None:
+            raise HTTPException(404, "No forecast model is installed")
+        as_of = date or default_day(user_id)
+        sessions = store.sessions(user_id, before=as_of)
+        row = forecast_features([s["date"] for s in sessions], [s["km"] for s in sessions],
+                                [s["minutes"] for s in sessions], as_of)
+        if row is None:
+            return {"available": False, "reason": "Needs at least 6 runs, one of 10 km or more, in the last 12 weeks"}
+        result = forecast_predict(forecast_model, row)
+        test = forecast_model["test"]
+        return {"available": True, "as_of": str(as_of), **{key: round(value, 1) for key, value in result.items()},
+                "features": {key: round(value, 2) for key, value in row.items()},
+                "method": "Linear model on the last 12 weeks, fitted on spring 2019 majors",
+                "test_mae_minutes": round(test["mae_minutes"], 1),
+                "test_mae_riegel_minutes": round(test["mae_riegel_minutes"], 1),
+                "test_interval_coverage": round(test["interval_coverage"], 3), "test_cases": test["cases"]}
 
     @app.post("/recommend")
     def recommend(request: RecommendRequest):

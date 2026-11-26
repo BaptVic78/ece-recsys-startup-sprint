@@ -31,10 +31,11 @@ class FrontendTest(unittest.TestCase):
     def tearDown(self):
         self.patch.stop()
 
-    def page(self, user_id, today):
+    def page(self, user_id, today, staff=True):
         app = AppTest.from_file(str(APP), default_timeout=60)
         app.session_state["user_id"] = user_id
         app.session_state["today"] = today
+        app.session_state["staff_view"] = staff
         return app.run()
 
     def test_slow_runner_recommendation_fits_the_completion_widget(self):
@@ -57,7 +58,7 @@ class FrontendTest(unittest.TestCase):
         loaded = self.client.post("/demo/4399/load").json()
         app = self.page(loaded["user_id"], date.fromisoformat(loaded["today"]))
         self.assertFalse(app.exception, app.exception)
-        self.assertEqual([tab.label for tab in app.tabs], ["Today", "Your week", "History"])
+        self.assertEqual([tab.label for tab in app.tabs], ["Today", "Training plan", "History"])
         self.assertFalse(app.number_input)
         [button for button in app.button if "Missed" in button.label][0].click().run()
         self.assertFalse(app.exception, app.exception)
@@ -111,6 +112,45 @@ class FrontendTest(unittest.TestCase):
         self.assertEqual(list(week.columns), ["Day", "Session", "Pace", "Time", "Model rank", "Top-ranked options"])
         self.assertTrue(all(cell.startswith("#") for cell in week["Model rank"]))
 
+    def test_staff_view_off_hides_ranks_and_model_columns(self):
+        loaded = self.client.post("/demo/4302/load").json()
+        today = date.fromisoformat(loaded["today"])
+        app = self.page(loaded["user_id"], today, staff=False)
+        self.assertFalse(app.exception, app.exception)
+        captions = " ".join(element.value for element in app.caption)
+        self.assertNotIn("in the model's ranking", captions)
+        self.assertIn("**Prefer something else today?**", [element.value for element in app.markdown])
+        self.assertEqual(list(app.dataframe[0].value.columns), ["Day", "Session", "Pace", "Time"])
+        app.toggle[0].set_value(True).run()
+        self.assertIn("in the model's ranking", " ".join(element.value for element in app.caption))
+        self.assertIn("Model rank", app.dataframe[0].value.columns)
+
+    def test_runner_can_pick_another_option_and_log_it(self):
+        loaded = self.client.post("/demo/4302/load").json()
+        today = date.fromisoformat(loaded["today"])
+        day = self.client.post("/recommend", json={"user_id": loaded["user_id"], "date": str(today), "top_k": 3}).json()
+        alternative = [item for item in day["recommendations"] if item["item"] != day["planned"]["item"]][0]
+        app = self.page(loaded["user_id"], today, staff=False)
+        [b for b in app.button if b.label == "Do this instead"][0].click().run()
+        self.assertFalse(app.exception, app.exception)
+        card = [element.value for element in app.subheader if " km · " in element.value][0]
+        self.assertTrue(card.startswith(f"{alternative['km']:g} km"))
+        self.assertIn("Back to the suggested session", [b.label for b in app.button])
+        [b for b in app.button if b.label == "Log run"][0].click().run()
+        [b for b in app.button if b.label == "Save run"][0].click().run()
+        self.assertFalse(app.exception, app.exception)
+        logged = self.client.get(f"/users/{loaded['user_id']}").json()["interactions"][-1]
+        self.assertEqual((logged["type"], logged["item"]), ("completed", alternative["item"]))
+
+    def test_plan_calendar_runs_until_race_day(self):
+        loaded = self.client.post("/demo/4302/load").json()
+        app = self.page(loaded["user_id"], date.fromisoformat(loaded["today"]), staff=False)
+        calendar = [element.value for element in app.markdown if "table class='cal'" in element.value][0]
+        self.assertIn("Marathon", calendar)
+        self.assertIn(date.fromisoformat(loaded["race_date"]).strftime("%d %b"), calendar)
+        self.assertNotIn("#", calendar)  # no model ranks outside staff view
+        rows = app.dataframe[0].value
+        self.assertGreater(len(rows), 7)
     def test_today_card_says_which_past_runs_drove_the_session(self):
         loaded = self.client.post("/demo/4302/load").json()
         today = date.fromisoformat(loaded["today"])
